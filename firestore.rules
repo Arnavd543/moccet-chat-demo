@@ -1,0 +1,152 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isEmailVerified() {
+      return request.auth.token.email_verified == true;
+    }
+    
+    function getUserRole(workspaceId) {
+      return get(/databases/$(database)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid)).data.role;
+    }
+    
+    function hasRole(workspaceId, allowedRoles) {
+      return isSignedIn() && getUserRole(workspaceId) in allowedRoles;
+    }
+    
+    function isWorkspaceAdmin(workspaceId) {
+      return hasRole(workspaceId, ['owner', 'admin', 'super_admin']);
+    }
+    
+    function isChannelMember(channelId) {
+      return isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/channels/$(channelId)).data.members;
+    }
+    
+    function isChannelAdmin(channelId) {
+      return isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/channels/$(channelId)).data.admins;
+    }
+    
+    function canCreateMessage() {
+      return isSignedIn() && 
+             (request.resource.data.userId == request.auth.uid ||
+              request.resource.data.senderId == request.auth.uid);
+    }
+    
+    function isMessageOwner() {
+      return isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+    
+    // Simplified rate limit function - removed for now
+    // We'll handle rate limiting in the application layer
+    
+    // Workspaces
+    match /workspaces/{workspaceId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && (
+        request.auth.uid == resource.data.ownerId ||
+        (resource.data.admins != null && request.auth.uid in resource.data.admins)
+      );
+      allow delete: if isSignedIn() && (
+        request.auth.uid == resource.data.ownerId ||
+        (resource.data.admins != null && request.auth.uid in resource.data.admins)
+      );
+      
+      // Workspace members
+      match /members/{memberId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn();
+        allow update: if isSignedIn();
+        allow delete: if false;
+      }
+      
+      // Audit logs
+      match /auditLogs/{logId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn();
+        allow update, delete: if false; // Audit logs are immutable
+      }
+    }
+    
+    // User profiles (public info)
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update: if isSignedIn() && request.auth.uid == userId;
+      allow delete: if false; // Users can't delete profiles
+    }
+    
+    // Channels
+    match /channels/{channelId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && (
+        (resource.data.members != null && request.auth.uid in resource.data.members) ||
+        (resource.data.admins != null && request.auth.uid in resource.data.admins) ||
+        request.auth.uid == resource.data.createdBy
+      );
+      allow delete: if isSignedIn() && (
+        (resource.data.admins != null && request.auth.uid in resource.data.admins) ||
+        request.auth.uid == resource.data.createdBy
+      );
+      
+      // Channel messages
+      match /messages/{messageId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && canCreateMessage();
+        allow update: if isMessageOwner();
+        allow delete: if isMessageOwner();
+        
+        // Message reactions
+        match /reactions/{reactionId} {
+          allow read: if isSignedIn();
+          allow create: if isSignedIn() && request.auth.uid == reactionId;
+          allow update: if request.auth.uid == reactionId;
+          allow delete: if request.auth.uid == reactionId;
+        }
+        
+        // Message threads
+        match /threads/{threadId} {
+          allow read: if isSignedIn();
+          allow write: if isSignedIn();
+        }
+      }
+    }
+    
+    // Direct messages
+    match /directMessages/{dmId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if false;
+      
+      match /messages/{messageId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && canCreateMessage();
+        allow update: if isMessageOwner();
+        allow delete: if isMessageOwner();
+      }
+    }
+    
+    // File attachments metadata
+    match /attachments/{attachmentId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && 
+                      request.auth.uid == request.resource.data.uploaderId;
+      allow update: if request.auth.uid == resource.data.uploaderId;
+      allow delete: if request.auth.uid == resource.data.uploaderId;
+    }
+    
+    // Rate limiting documents
+    match /rateLimits/{document} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if false;
+    }
+  }
+}

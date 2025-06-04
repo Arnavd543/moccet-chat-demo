@@ -1,4 +1,20 @@
-# Getting Started with Create React App
+# Moccet Chat Demo
+
+A modern, real-time chat application built with React and Firebase.
+
+## 🚀 Quick Start
+
+### Using Firebase Free Tier (No Cloud Functions)
+If you want to use the app without upgrading to Firebase's Blaze plan, see [FUNCTIONS_FREE_TIER.md](./FUNCTIONS_FREE_TIER.md) for instructions.
+
+### Development with Emulators
+```bash
+# Terminal 1: Start Firebase emulators
+npm run emulators
+
+# Terminal 2: Start React app
+npm start
+```
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 
