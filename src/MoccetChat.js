@@ -5,60 +5,85 @@ import { useMessage } from './contexts/MessageContext';
 import { firestoreService } from './services/firestore';
 import { realtimeService } from './services/realtime';
 import { usePresence } from './hooks/usePresence';
+import { createSimpleWorkspace, archiveAllUserWorkspaces } from './services/firestoreSimple';
 
+/**
+ * MoccetChat - Main chat interface component
+ * 
+ * This is the primary component that renders the entire chat application interface.
+ * It manages workspaces, channels, messages, and all user interactions.
+ * 
+ * @component
+ * @returns {JSX.Element} The complete chat application interface
+ */
 const MoccetChat = () => {
-  // State management
+  // ============ Authentication & User Context ============
   const { currentUser, userProfile, logout } = useAuth();
   
+  // ============ UI State Management ============
   const [isDarkTheme, setIsDarkTheme] = useState(false);
   const [showChannelsSidebar, setShowChannelsSidebar] = useState(true);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showSmartCommands, setShowSmartCommands] = useState(false);
   const [showAgentDirectory, setShowAgentDirectory] = useState(false);
   const [showContextPanel, setShowContextPanel] = useState(true);
-  const [inputValue, setInputValue] = useState('');
   const [showTypingIndicator, setShowTypingIndicator] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showCreateChannel, setShowCreateChannel] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);
+  
+  // ============ Data State Management ============
+  const [inputValue, setInputValue] = useState('');
   const [activeChannelId, setActiveChannelId] = useState(null);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(null);
   const [workspaces, setWorkspaces] = useState([]);
   const [channels, setChannels] = useState([]);
   const [directMessages, setDirectMessages] = useState([]);
-  const [showCreateChannel, setShowCreateChannel] = useState(false);
   const [newChannelName, setNewChannelName] = useState('');
   const [newChannelType, setNewChannelType] = useState('public');
-  const [isInitializing, setIsInitializing] = useState(true);
-  const [showProfileMenu, setShowProfileMenu] = useState(false);
-  const [showProfileModal, setShowProfileModal] = useState(false);
   const [stagedAttachments, setStagedAttachments] = useState([]);
-  const [uploadingFiles, setUploadingFiles] = useState([]);
   
-  // Message context
+  // ============ Message Context & Operations ============
   const messageContext = useMessage();
+  const { 
+    messages, 
+    loadingStates,
+    sendMessage, 
+    addReaction, 
+    removeReaction,
+    uploadFileAndSend,
+    subscribeToChannel,
+    unsubscribeFromChannel
+  } = messageContext;
   
-  // Use presence hook
+  // Get loading state for active channel
+  const loading = loadingStates[activeChannelId] || false;
+  
+  // Get messages for active channel with memoization for performance
+  const currentMessages = React.useMemo(() => messages[activeChannelId] || [], [messages, activeChannelId]);
+  
+  // ============ Presence & Real-time Features ============
+  // Track user presence in the active channel
   usePresence(activeChannelId);
   
-  const messagesEndRef = useRef(null);
-  const inputRef = useRef(null);
-  const typingTimeoutRef = useRef(null);
-  const fileInputRef = useRef(null);
+  // ============ Refs for DOM Elements ============
+  const messagesEndRef = useRef(null);    // Auto-scroll to bottom
+  const inputRef = useRef(null);          // Message input field
+  const typingTimeoutRef = useRef(null);  // Typing indicator timeout
+  const fileInputRef = useRef(null);      // Hidden file input
   
-  // Function to refresh channels
-  const refreshChannels = async () => {
-    if (activeWorkspaceId && currentUser) {
-      try {
-        const workspaceChannels = await firestoreService.getChannels(activeWorkspaceId, currentUser.uid);
-        setChannels(workspaceChannels);
-      } catch (error) {
-        console.error('Error refreshing channels:', error);
-      }
-    }
-  };
+  // ============ File Upload State ============
+  const [uploadProgress, setUploadProgress] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [showLightbox, setShowLightbox] = useState(false);
+  const [lightboxImage, setLightboxImage] = useState(null);
 
-  // Emoji list
+  // ============ Constants ============
+  // Available emojis for the emoji picker
   const emojis = ['😊', '😂', '🙂', '😍', '😎', '🤔', '🤗', '🤫', '😮', '😥', '😴', '😫', '🤯', '🥳', '😇', '👍', '👎', '👏', '🙏', '🔥', '❤️', '🚀', '🎉', '💯'];
 
-  // Smart commands list
+  // Smart commands available with "/" prefix
   const smartCommandsList = [
     { icon: 'fa-robot', name: 'Agent Directory', desc: 'Browse and add AI agents to your workspace', shortcut: '/agent' },
     { icon: 'fa-wand-magic-sparkles', name: 'AI Generate', desc: 'Generate content with AI', shortcut: '/ai' },
@@ -66,7 +91,12 @@ const MoccetChat = () => {
     { icon: 'fa-code', name: 'Code Block', desc: 'Insert formatted code snippet', shortcut: '/code' }
   ];
 
-  // Helper function to format time ago
+  // ============ Utility Functions ============
+  /**
+   * Formats a timestamp into a human-readable relative time
+   * @param {Date|Timestamp} timestamp - The timestamp to format
+   * @returns {string} Formatted time string (e.g., "2m", "3h", "5d")
+   */
   const formatTimeAgo = (timestamp) => {
     if (!timestamp) return '';
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
@@ -79,18 +109,32 @@ const MoccetChat = () => {
     return `${Math.floor(diff / 86400)}d`;
   };
 
-  // Initialize workspace and channels on mount
+  // ============ Effects & Initialization ============
+  /**
+   * Initialize workspace and channels when component mounts
+   * Creates default workspace if none exists
+   */
   useEffect(() => {
     const initializeWorkspace = async () => {
       if (!currentUser) return;
       
       setIsInitializing(true);
       try {
-        // Get user's workspaces
-        let userWorkspaces = await firestoreService.getUserWorkspaces(currentUser.uid);
+        console.log('Initializing workspace for user:', currentUser.uid);
         
-        // If no workspaces, create a default one
-        if (userWorkspaces.length === 0) {
+        // Get user's workspaces
+        const userWorkspaces = await firestoreService.getUserWorkspaces(currentUser.uid);
+        console.log('User workspaces:', userWorkspaces);
+        console.log('Number of workspaces:', userWorkspaces.length);
+        console.log('Workspace details:', JSON.stringify(userWorkspaces, null, 2));
+        
+        // Filter out invalid workspaces
+        const validWorkspaces = userWorkspaces.filter(ws => ws && ws.id);
+        console.log('Valid workspaces:', validWorkspaces.length);
+        setWorkspaces(validWorkspaces);
+        
+        // If no workspaces exist, create a default one
+        if (validWorkspaces.length === 0) {
           console.log('[MoccetChat] No workspaces found, creating default workspace...');
           const newWorkspace = await firestoreService.createWorkspace({
             name: 'My Workspace',
@@ -99,24 +143,31 @@ const MoccetChat = () => {
             members: [currentUser.uid],
             admins: [currentUser.uid]
           });
-          userWorkspaces = [newWorkspace];
+          validWorkspaces.push(newWorkspace);
+          setWorkspaces([newWorkspace]);
         }
         
-        setWorkspaces(userWorkspaces);
-        
-        if (userWorkspaces.length > 0) {
-          const defaultWorkspace = userWorkspaces[0];
+        if (validWorkspaces.length > 0) {
+          const defaultWorkspace = validWorkspaces[0];
           setActiveWorkspaceId(defaultWorkspace.id);
+          console.log('Active workspace:', defaultWorkspace.id);
           
-          // Get channels for the workspace (pass userId to get member channels)
+          // Get channels for the workspace
           const workspaceChannels = await firestoreService.getChannels(defaultWorkspace.id, currentUser.uid);
+          console.log('Workspace channels:', workspaceChannels);
           setChannels(workspaceChannels);
           
           // Set the first channel as active
           if (workspaceChannels.length > 0) {
             const firstChannel = workspaceChannels[0];
+            console.log('[MoccetChat] Setting initial active channel:', {
+              channelId: firstChannel.id,
+              channelName: firstChannel.name
+            });
             setActiveChannelId(firstChannel.id);
-            // Don't subscribe here - the useEffect will handle it
+          } else {
+            console.log('[MoccetChat] No channels found in workspace');
+            setActiveChannelId(null);
           }
         }
         
@@ -125,54 +176,92 @@ const MoccetChat = () => {
         setDirectMessages(dms);
       } catch (error) {
         console.error('Error initializing workspace:', error);
-        // Show user-friendly error message
-        alert('Failed to load workspace. Please refresh the page and try again.');
       } finally {
         setIsInitializing(false);
       }
     };
     
     initializeWorkspace();
-  }, [currentUser, messageContext]);
+  }, [currentUser]);
+  
+  // Load channels when workspace changes
+  useEffect(() => {
+    const loadChannels = async () => {
+      if (!activeWorkspaceId || !currentUser) return;
+      
+      try {
+        console.log('Loading channels for workspace:', activeWorkspaceId);
+        const workspaceChannels = await firestoreService.getChannels(activeWorkspaceId, currentUser.uid);
+        console.log('Loaded channels:', workspaceChannels);
+        setChannels(workspaceChannels);
+        
+        // If no active channel but channels exist, select the first one
+        if (!activeChannelId && workspaceChannels.length > 0) {
+          const firstChannel = workspaceChannels[0];
+          setActiveChannelId(firstChannel.id);
+        }
+      } catch (error) {
+        console.error('Error loading channels:', error);
+      }
+    };
+    
+    loadChannels();
+  }, [activeWorkspaceId, currentUser]); // Removed activeChannelId to prevent infinite loop
+  
+  // Subscribe to messages when channel changes
+  useEffect(() => {
+    console.log('[MoccetChat] Channel subscription effect triggered:', {
+      activeChannelId,
+      hasSubscribeFunction: !!subscribeToChannel,
+      hasSetActiveChannel: false
+    });
+    
+    if (!activeChannelId || !subscribeToChannel) {
+      console.log('[MoccetChat] Missing required props, skipping subscription:', {
+        activeChannelId,
+        hasSubscribeToChannel: !!subscribeToChannel
+      });
+      return;
+    }
+    
+    console.log('[MoccetChat] Subscribing to channel:', activeChannelId);
+    // Don't log channel details to avoid dependency warning
+    
+    // Subscribe to channel messages
+    subscribeToChannel(activeChannelId);
+    
+    // Clear input when switching channels
+    setInputValue('');
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+    }
+    
+    return () => {
+      console.log('[MoccetChat] Cleanup: unsubscribing from channel:', activeChannelId);
+      if (unsubscribeFromChannel) {
+        unsubscribeFromChannel(activeChannelId);
+      }
+    };
+  }, [activeChannelId, subscribeToChannel, unsubscribeFromChannel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Subscribe to typing indicators
   useEffect(() => {
     if (!activeChannelId || !currentUser) return;
 
     const unsubscribe = realtimeService.subscribeToTyping(activeChannelId, (typingUsers) => {
-      const otherUsersTyping = typingUsers.filter(user => user.userId !== currentUser.uid);
+      // typingUsers is an object with userIds as keys
+      const otherUsersTyping = Object.keys(typingUsers).filter(userId => userId !== currentUser.uid);
       setShowTypingIndicator(otherUsersTyping.length > 0);
     });
 
     return () => unsubscribe();
   }, [activeChannelId, currentUser]);
 
-  // Subscribe to active channel messages
-  useEffect(() => {
-    if (activeChannelId) {
-      console.log('[MoccetChat] Channel changed, subscribing to:', activeChannelId);
-      messageContext.subscribeToChannel(activeChannelId);
-      
-      return () => {
-        messageContext.unsubscribeFromChannel(activeChannelId);
-      };
-    }
-  }, [activeChannelId, messageContext]);
-  
-  // Get messages for current channel
-  const channelMessages = React.useMemo(() => {
-    if (activeChannelId && messageContext.messages[activeChannelId]) {
-      return messageContext.messages[activeChannelId].filter(msg => msg.id && msg.id !== '');
-    }
-    return [];
-  }, [activeChannelId, messageContext.messages]);
-  
-  const loading = activeChannelId ? messageContext.loadingStates[activeChannelId] || false : false;
-  
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
+    console.log('[MoccetChat] Messages changed, scrolling to bottom. Message count:', currentMessages.length);
     scrollToBottom();
-  }, [channelMessages]);
+  }, [currentMessages]);
 
   // Close profile menu when clicking outside
   useEffect(() => {
@@ -190,12 +279,20 @@ const MoccetChat = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // Handle theme toggle
+  /**
+   * Toggles between light and dark theme
+   */
   const handleThemeToggle = () => {
     setIsDarkTheme(!isDarkTheme);
   };
 
-  // Handle input change
+  /**
+   * Handles message input changes
+   * - Shows smart commands when "/" is typed
+   * - Auto-resizes textarea
+   * - Manages typing indicators
+   * @param {Event} e - Input change event
+   */
   const handleInputChange = (e) => {
     const value = e.target.value;
     setInputValue(value);
@@ -217,8 +314,8 @@ const MoccetChat = () => {
       // Set typing status
       if (value.trim()) {
         realtimeService.setTypingStatus(activeChannelId, currentUser.uid, true, {
-          userName: userProfile?.displayName || currentUser.email || 'Unknown User',
-          userPhoto: userProfile?.photoURL || currentUser.photoURL || null
+          userName: currentUser.displayName || currentUser.email,
+          userPhoto: currentUser.photoURL
         });
         
         // Clear typing after 3 seconds of no input
@@ -231,25 +328,44 @@ const MoccetChat = () => {
     }
   };
 
-  // Handle send message with attachments
+  /**
+   * Handles sending messages with or without attachments
+   * - Validates channel and workspace
+   * - Handles file uploads if attachments are staged
+   * - Clears input and typing indicators after sending
+   */
   const handleSendMessage = async () => {
     const hasContent = inputValue.trim();
     const hasAttachments = stagedAttachments.length > 0;
     
     if ((hasContent || hasAttachments) && activeChannelId && activeWorkspaceId) {
       try {
-        console.log('[MoccetChat] Sending message with attachments:', {
-          channelId: activeChannelId,
-          workspaceId: activeWorkspaceId,
-          content: inputValue.trim(),
-          attachmentCount: stagedAttachments.length
-        });
+        // Validate channel exists
+        const channelExists = channels.some(c => c.id === activeChannelId);
+        if (!channelExists) {
+          console.error('[MoccetChat] Active channel not found in channels list:', {
+            activeChannelId,
+            availableChannels: channels.map(c => ({ id: c.id, name: c.name }))
+          });
+          alert('Invalid channel selected. Please select a valid channel.');
+          return;
+        }
         
         // Clear typing indicator
         if (typingTimeoutRef.current) {
           clearTimeout(typingTimeoutRef.current);
         }
         realtimeService.setTypingStatus(activeChannelId, currentUser.uid, false);
+        
+        console.log('[MoccetChat] Preparing to send message:', {
+          channelId: activeChannelId,
+          channelName: channels.find(c => c.id === activeChannelId)?.name,
+          workspaceId: activeWorkspaceId,
+          content: inputValue.trim(),
+          contentLength: inputValue.trim().length,
+          attachmentCount: stagedAttachments.length,
+          currentUser: currentUser.uid
+        });
         
         // If we have attachments, upload them first
         if (hasAttachments) {
@@ -264,7 +380,7 @@ const MoccetChat = () => {
               );
               
               // Upload and send each file with the message content
-              await messageContext.uploadFileAndSend(
+              await uploadFileAndSend(
                 activeChannelId,
                 activeWorkspaceId,
                 attachment.file,
@@ -295,11 +411,23 @@ const MoccetChat = () => {
           setStagedAttachments([]);
         } else {
           // No attachments, just send the message
-          await messageContext.sendMessage(activeChannelId, inputValue.trim(), activeWorkspaceId);
+          console.log('[MoccetChat] Calling sendMessage...');
+          const result = await sendMessage(activeChannelId, inputValue.trim(), activeWorkspaceId);
+          if (result) {
+            console.log('[MoccetChat] Message sent successfully:', {
+              messageId: result.id,
+              channelId: result.channelId,
+              content: result.content?.substring(0, 50)
+            });
+          } else {
+            console.error('[MoccetChat] Message send returned no result');
+          }
         }
         
         setInputValue('');
-        inputRef.current.style.height = 'auto';
+        if (inputRef.current) {
+          inputRef.current.style.height = 'auto';
+        }
       } catch (error) {
         console.error('[MoccetChat] Error sending message:', error);
         alert(`Failed to send message: ${error.message}`);
@@ -309,12 +437,16 @@ const MoccetChat = () => {
         hasContent,
         hasAttachments,
         hasChannelId: !!activeChannelId,
-        hasWorkspaceId: !!activeWorkspaceId
+        hasWorkspaceId: !!activeWorkspaceId,
+        activeChannelId
       });
     }
   };
 
-  // Handle key press in input
+  /**
+   * Handles keyboard events in message input
+   * @param {KeyboardEvent} e - Keyboard event
+   */
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -322,42 +454,37 @@ const MoccetChat = () => {
     }
   };
 
-  // Handle emoji selection
+  /**
+   * Handles emoji selection from picker
+   * @param {string} emoji - Selected emoji
+   */
   const handleEmojiSelect = (emoji) => {
     setInputValue(inputValue + emoji);
     setShowEmojiPicker(false);
     inputRef.current.focus();
   };
 
-  // Handle reaction toggle
-  const handleReactionToggle = async (messageId, reaction) => {
-    try {
-      const message = channelMessages.find(m => m.id === messageId);
-      if (!message) return;
-      
-      const userReaction = message.reactions?.find(
-        r => r.emoji === reaction && r.userId === currentUser.uid
-      );
-      
-      if (userReaction) {
-        await messageContext.removeReaction(activeChannelId, messageId, reaction);
-      } else {
-        await messageContext.addReaction(activeChannelId, messageId, reaction);
-      }
-    } catch (error) {
-      console.error('Error toggling reaction:', error);
-    }
+  /**
+   * Handles file selection from file input
+   * Stages files for upload instead of immediate sending
+   * @param {Event} e - File input change event
+   */
+  const handleFileSelect = (e) => {
+    const files = Array.from(e.target.files);
+    handleFiles(files);
   };
 
-  // Handle file selection - stage files for upload
-  const handleFileSelect = async (e) => {
-    const files = Array.from(e.target.files);
-    if (!files.length) return;
+  /**
+   * Processes files for upload
+   * @param {File[]} files - Array of files to process
+   */
+  const handleFiles = async (files) => {
+    if (!activeChannelId || !activeWorkspaceId) return;
 
-    // Stage the files
+    // Stage the files instead of uploading immediately
     const newAttachments = files.map(file => ({
       file,
-      id: Date.now() + Math.random(), // Temporary ID
+      id: Date.now() + Math.random(),
       name: file.name,
       size: file.size,
       type: file.type,
@@ -368,7 +495,7 @@ const MoccetChat = () => {
 
     setStagedAttachments(prev => [...prev, ...newAttachments]);
     
-    // Clear the input
+    // Clear the file input
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -378,6 +505,109 @@ const MoccetChat = () => {
   const removeStagedAttachment = (id) => {
     setStagedAttachments(prev => prev.filter(att => att.id !== id));
   };
+
+  // Drag and drop handlers
+  const handleDragEnter = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.currentTarget === e.target) {
+      setIsDragging(false);
+    }
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) {
+      handleFiles(files);
+    }
+  };
+
+  // Paste handler
+  const handlePaste = (e) => {
+    const items = Array.from(e.clipboardData.items);
+    const files = items
+      .filter(item => item.kind === 'file')
+      .map(item => item.getAsFile())
+      .filter(file => file !== null);
+
+    if (files.length > 0) {
+      handleFiles(files);
+    }
+  };
+
+
+  const closeLightbox = () => {
+    setShowLightbox(false);
+    setLightboxImage(null);
+  };
+
+  // Handle channel creation
+  const handleCreateChannel = async () => {
+    console.log('Create channel clicked:', {
+      channelName: newChannelName,
+      channelType: newChannelType,
+      workspaceId: activeWorkspaceId,
+      currentUser: currentUser?.uid
+    });
+    
+    if (!newChannelName.trim() || !activeWorkspaceId || !currentUser) {
+      alert(`Cannot create channel: ${!newChannelName.trim() ? 'No name' : !activeWorkspaceId ? 'No workspace' : 'Not logged in'}`);
+      return;
+    }
+    
+    try {
+      const newChannel = await firestoreService.createChannel({
+        workspaceId: activeWorkspaceId,
+        name: newChannelName.trim(),
+        description: `${newChannelName} channel`,
+        type: newChannelType,
+        createdBy: currentUser.uid,
+        members: [currentUser.uid],
+        admins: [currentUser.uid]
+      });
+      
+      console.log('[MoccetChat] New channel created:', newChannel);
+      
+      // Reload channels from Firestore to ensure consistency
+      const updatedChannels = await firestoreService.getChannels(activeWorkspaceId, currentUser.uid);
+      console.log('[MoccetChat] Reloaded channels after creation:', updatedChannels.map(c => ({ id: c.id, name: c.name })));
+      setChannels(updatedChannels);
+      
+      // Find the newly created channel in the updated list
+      const createdChannel = updatedChannels.find(c => c.id === newChannel.id);
+      if (createdChannel) {
+        // Set it as active
+        setActiveChannelId(createdChannel.id);
+        console.log('[MoccetChat] Set active channel to:', createdChannel.id);
+      } else {
+        console.error('[MoccetChat] Could not find newly created channel in updated list');
+      }
+      
+      // Reset form
+      setNewChannelName('');
+      setNewChannelType('public');
+      setShowCreateChannel(false);
+    } catch (error) {
+      console.error('Error creating channel:', error);
+      alert('Failed to create channel: ' + error.message);
+    }
+  };
+
 
   // Show loading screen during initialization
   if (isInitializing && !activeWorkspaceId) {
@@ -404,7 +634,6 @@ const MoccetChat = () => {
 
   return (
     <div className={`moccet-app-container ${isDarkTheme ? 'moccet-dark-theme' : ''}`}>
-      
       {/* Left Sidebar (Nav) */}
       <div className="moccet-sidebar">
         <div className="moccet-sidebar-logo">m</div>
@@ -433,6 +662,11 @@ const MoccetChat = () => {
           <div className="moccet-nav-item" title="Settings">
             <i className="fa-solid fa-gear"></i>
             <div className="moccet-tooltip">Settings</div>
+          </div>
+          
+          <div className="moccet-nav-item" onClick={() => setShowChannelsSidebar(!showChannelsSidebar)} title="Toggle Channels">
+            <i className="fa-solid fa-bars"></i>
+            <div className="moccet-tooltip">Toggle Channels</div>
           </div>
           
           <div className="moccet-nav-item-avatar" onClick={() => setShowProfileMenu(!showProfileMenu)} title="Profile menu">
@@ -477,8 +711,8 @@ const MoccetChat = () => {
         <div className="moccet-theme-toggle" onClick={handleThemeToggle}>
           <i className={`fa-solid ${isDarkTheme ? 'fa-moon' : 'fa-sun'}`}></i>
         </div>
-        <div className="moccet-add-button">
-          <i className="fa-solid fa-plus"></i>
+        <div className="moccet-add-button" onClick={() => setShowChannelsSidebar(!showChannelsSidebar)}>
+          <i className="fa-solid fa-bars"></i>
         </div>
       </div>
       
@@ -499,11 +733,12 @@ const MoccetChat = () => {
         </div>
         
         <div className="moccet-channels-section">
+          
           {/* Pinned Channels */}
           <div className="moccet-section-title">
             Pinned Spaces
             <div className="moccet-section-title-actions">
-              <div className="moccet-section-action" onClick={() => setShowCreateChannel(true)} title="Create Channel">
+              <div className="moccet-section-action" onClick={() => setShowCreateChannel(true)}>
                 <i className="fa-solid fa-plus"></i>
               </div>
               <div className="moccet-section-action">
@@ -514,7 +749,7 @@ const MoccetChat = () => {
           <ul className="moccet-channel-list">
             {channels.length === 0 ? (
               <li className="moccet-channel-item moccet-loading">
-                <i className="fa-solid fa-spinner fa-spin"></i> Loading channels...
+                <span style={{color: '#6b7280', fontSize: '14px'}}>No channels yet</span>
               </li>
             ) : (
               channels.map(channel => (
@@ -522,9 +757,15 @@ const MoccetChat = () => {
                   key={channel.id} 
                   className={`moccet-channel-item ${activeChannelId === channel.id ? 'moccet-active' : ''}`}
                   onClick={() => {
-                    console.log('[MoccetChat] Switching to channel:', channel.id);
+                    console.log('[MoccetChat] Channel clicked:', {
+                      channelId: channel.id,
+                      channelName: channel.name,
+                      currentActiveChannel: activeChannelId
+                    });
+                    
+                    // Update local state
                     setActiveChannelId(channel.id);
-                    setInputValue(''); // Clear input when switching channels
+                    console.log('[MoccetChat] Channel selection complete');
                   }}
                 >
                   <div className="moccet-channel-icon">
@@ -551,7 +792,7 @@ const MoccetChat = () => {
           <div className="moccet-dm-list">
             {directMessages.length === 0 ? (
               <div className="moccet-dm-item moccet-loading">
-                <i className="fa-solid fa-spinner fa-spin"></i> No direct messages
+                <span style={{color: '#6b7280', fontSize: '14px'}}>No conversations yet</span>
               </div>
             ) : (
               directMessages.map(dm => {
@@ -597,7 +838,11 @@ const MoccetChat = () => {
             </div>
             <div className="moccet-project-details">
               <div className="moccet-project-name">
-                {channels.find(c => c.id === activeChannelId)?.name || 'Select a channel'}
+                {(() => {
+                  const activeChannel = channels.find(c => c.id === activeChannelId);
+                  const channelName = activeChannel?.name || (activeChannelId ? `Channel ${activeChannelId.substring(0, 8)}` : 'Select a channel');
+                  return channelName;
+                })()}
               </div>
               <div className="moccet-project-members">
                 <div className="moccet-project-members-avatars">
@@ -640,27 +885,43 @@ const MoccetChat = () => {
         </div>
         
         {/* Chat Area */}
-        <div className="moccet-chat-area">
+        <div 
+          className="moccet-chat-area"
+          onDragEnter={handleDragEnter}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          {/* Drag and Drop Overlay */}
+          {isDragging && (
+            <div className="moccet-drag-overlay">
+              <div className="moccet-drag-content">
+                <i className="fa-solid fa-cloud-arrow-up"></i>
+                <h3>Drop files to upload</h3>
+                <p>Images, documents, videos up to 100MB</p>
+              </div>
+            </div>
+          )}
+          
           {/* Messages Container */}
           <div className="moccet-messages-container">
-            {loading && channelMessages.length === 0 ? (
+            {loading && currentMessages.length === 0 ? (
               <div className="moccet-loading-container">
                 <div className="moccet-loading-spinner">
                   <i className="fa-solid fa-spinner fa-spin"></i>
                 </div>
                 <div className="moccet-loading-text">Loading messages...</div>
               </div>
-            ) : channelMessages.length === 0 ? (
+            ) : currentMessages.length === 0 ? (
               <div className="moccet-empty-messages">
-                <div className="moccet-empty-icon">
-                  <i className="fa-solid fa-comments"></i>
-                </div>
-                <div className="moccet-empty-text">No messages yet. Start the conversation!</div>
+                <p style={{textAlign: 'center', color: '#6b7280', marginTop: '2rem'}}>
+                  No messages yet. Start a conversation!
+                </p>
               </div>
             ) : (
               <>
-                {channelMessages.map((message) => {
-                  const isCurrentUser = message.senderId === currentUser?.uid || message.userId === currentUser?.uid;
+                {currentMessages.filter(message => message.id).map((message) => {
+                  const isCurrentUser = message.userId === currentUser?.uid || message.senderId === currentUser?.uid;
                   const messageTime = message.createdAt?.toDate ? 
                     new Date(message.createdAt.toDate()).toLocaleTimeString('en-US', { 
                       hour: 'numeric', 
@@ -669,136 +930,171 @@ const MoccetChat = () => {
                     }) : 'Just now';
                   
                   return (
-                    <div key={message.id} className={`moccet-message ${!isCurrentUser ? 'moccet-ai-message' : ''}`}>
-                      <div className={`moccet-message-avatar ${!isCurrentUser ? 'moccet-ai-agent-avatar' : ''}`}>
-                        {message.senderAvatar || message.sender?.photoURL ? (
-                          <img src={message.senderAvatar || message.sender?.photoURL} alt="Avatar" />
-                        ) : (
-                          <div className="moccet-message-default-avatar">
-                            <i className="fa-solid fa-user"></i>
-                          </div>
-                        )}
-                      </div>
-                      <div className="moccet-message-content">
-                        <div className="moccet-message-header">
-                          <div className="moccet-message-sender">
-                            {message.senderName || message.sender?.displayName || 'Unknown User'}
-                          </div>
-                          <div className="moccet-message-time">{messageTime}</div>
-                          {message.status === 'sending' && (
-                            <div className="moccet-message-status">Sending...</div>
+                    <div key={message.id} style={{
+                      display: 'flex',
+                      justifyContent: isCurrentUser ? 'flex-end' : 'flex-start',
+                      marginBottom: '16px',
+                      width: '100%'
+                    }}>
+                      <div style={{
+                        display: 'flex',
+                        gap: '8px',
+                        maxWidth: '70%',
+                        flexDirection: isCurrentUser ? 'row-reverse' : 'row'
+                      }}>
+                        <div style={{
+                          width: '32px',
+                          height: '32px',
+                          borderRadius: '50%',
+                          overflow: 'hidden',
+                          flexShrink: 0,
+                          background: '#e5e7eb'
+                        }}>
+                          {message.senderAvatar || message.sender?.photoURL ? (
+                            <img 
+                              src={message.senderAvatar || message.sender?.photoURL} 
+                              alt="Avatar" 
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            />
+                          ) : (
+                            <div style={{
+                              width: '100%',
+                              height: '100%',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              background: isCurrentUser ? '#7c3aed' : '#6b7280',
+                              color: 'white'
+                            }}>
+                              <i className="fa-solid fa-user" style={{ fontSize: '14px' }}></i>
+                            </div>
                           )}
                         </div>
-                        <div className="moccet-message-text">
-                          {message.content?.split('\n').map((line, i) => (
-                            <p key={i}>{line}</p>
-                          )) || <p>{message.content}</p>}
-                        </div>
-                        
-                        {/* Display attachments */}
-                        {message.attachments && message.attachments.length > 0 && (
-                          <div className="moccet-message-attachments">
-                            {message.attachments.map((attachment, idx) => {
-                              const isImage = attachment.type?.startsWith('image/');
-                              
-                              if (isImage) {
-                                return (
-                                  <div key={idx} className="moccet-message-attachment">
-                                    <img 
-                                      src={attachment.url} 
-                                      alt={attachment.name}
-                                      className="moccet-message-image"
-                                      onClick={() => window.open(attachment.url, '_blank')}
-                                    />
-                                  </div>
-                                );
-                              } else {
-                                return (
-                                  <div key={idx} className="moccet-message-attachment">
-                                    <div className="moccet-message-file">
-                                      <div className="moccet-message-file-icon">
-                                        <i className="fa-solid fa-file"></i>
-                                      </div>
-                                      <div className="moccet-message-file-info">
-                                        <div className="moccet-message-file-name">{attachment.name}</div>
-                                        <div className="moccet-message-file-size">
-                                          {(attachment.size / 1024 / 1024).toFixed(2)} MB
-                                        </div>
-                                      </div>
-                                      <a 
-                                        href={attachment.url} 
-                                        download={attachment.name}
-                                        className="moccet-message-file-download"
-                                      >
-                                        Download
-                                      </a>
+                        <div style={{
+                          background: isCurrentUser ? '#7c3aed' : 'white',
+                          color: isCurrentUser ? 'white' : '#111827',
+                          padding: '12px 16px',
+                          borderRadius: '12px',
+                          boxShadow: '0 1px 2px rgba(0, 0, 0, 0.1)',
+                          border: isCurrentUser ? 'none' : '1px solid #e5e7eb',
+                          minWidth: '100px'
+                        }}>
+                          <div style={{
+                            fontSize: '12px',
+                            opacity: 0.8,
+                            marginBottom: '4px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            gap: '8px'
+                          }}>
+                            <div style={{ fontWeight: '600' }}>
+                              {message.senderName || message.sender?.displayName || message.sender?.email || 'Unknown User'}
+                            </div>
+                            <div>{messageTime}</div>
+                          </div>
+                          <div style={{
+                            fontSize: '14px',
+                            lineHeight: '1.5',
+                            wordBreak: 'break-word'
+                          }}>
+                            {message.content}
+                          </div>
+                          
+                          {/* Display attachments */}
+                          {message.attachments && message.attachments.length > 0 && (
+                            <div className="moccet-message-attachments" style={{ marginTop: '8px' }}>
+                              {message.attachments.map((attachment, idx) => {
+                                const isImage = attachment.type?.startsWith('image/');
+                                
+                                if (isImage) {
+                                  return (
+                                    <div key={idx} className="moccet-message-attachment" style={{ marginBottom: '8px' }}>
+                                      <img 
+                                        src={attachment.url} 
+                                        alt={attachment.name}
+                                        style={{
+                                          maxWidth: '300px',
+                                          maxHeight: '300px',
+                                          borderRadius: '8px',
+                                          cursor: 'pointer',
+                                          display: 'block'
+                                        }}
+                                        onClick={() => window.open(attachment.url, '_blank')}
+                                      />
                                     </div>
-                                  </div>
-                                );
-                              }
-                            })}
-                          </div>
-                        )}
-                  
-                  {message.hasInsight && (
-                    <div className="moccet-ai-insight">
-                      <div className="moccet-ai-insight-title">
-                        <i className="fa-solid fa-lightbulb"></i>
-                        Suggestion
-                      </div>
-                      <div className="moccet-ai-insight-content">
-                        Consider including specific milestones and target dates for the development phase to help set clear expectations for the team.
-                      </div>
-                    </div>
-                  )}
-                  
-                  {message.smartActions && (
-                    <div className="moccet-ai-smart-actions">
-                      {message.smartActions.map((action, i) => (
-                        <div key={i} className="moccet-smart-action-btn">
-                          <i className={`fa-solid ${i === 0 ? 'fa-file-lines' : i === 1 ? 'fa-calendar-check' : i === 2 ? 'fa-robot' : 'fa-rotate'}`}></i>
-                          {action}
+                                  );
+                                } else {
+                                  return (
+                                    <div key={idx} className="moccet-message-attachment" style={{ marginBottom: '8px' }}>
+                                      <div style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        padding: '12px',
+                                        background: 'rgba(0,0,0,0.05)',
+                                        borderRadius: '8px',
+                                        gap: '12px'
+                                      }}>
+                                        <div style={{
+                                          width: '40px',
+                                          height: '40px',
+                                          background: '#7c3aed',
+                                          borderRadius: '8px',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          color: 'white'
+                                        }}>
+                                          <i className="fa-solid fa-file"></i>
+                                        </div>
+                                        <div style={{ flex: 1 }}>
+                                          <div style={{ fontWeight: '500', marginBottom: '4px' }}>{attachment.name}</div>
+                                          <div style={{ fontSize: '12px', opacity: 0.7 }}>
+                                            {(attachment.size / 1024 / 1024).toFixed(2)} MB
+                                          </div>
+                                        </div>
+                                        <a 
+                                          href={attachment.url} 
+                                          download={attachment.name}
+                                          style={{
+                                            padding: '6px 12px',
+                                            background: '#7c3aed',
+                                            color: 'white',
+                                            borderRadius: '4px',
+                                            textDecoration: 'none',
+                                            fontSize: '12px'
+                                          }}
+                                        >
+                                          Download
+                                        </a>
+                                      </div>
+                                    </div>
+                                  );
+                                }
+                              })}
+                            </div>
+                          )}
+                          
+                          {/* Message status indicator */}
+                          {isCurrentUser && message.status && (
+                            <div style={{
+                              fontSize: '10px',
+                              marginTop: '4px',
+                              textAlign: 'right',
+                              opacity: 0.7
+                            }}>
+                              {message.status === 'sending' && (
+                                <span><i className="fa-solid fa-clock"></i> Sending...</span>
+                              )}
+                              {message.status === 'sent' && (
+                                <span><i className="fa-solid fa-check"></i> Sent</span>
+                              )}
+                              {message.status === 'failed' && (
+                                <span style={{ color: '#ef4444' }}><i className="fa-solid fa-xmark"></i> Failed</span>
+                              )}
+                            </div>
+                          )}
                         </div>
-                      ))}
-                    </div>
-                  )}
-                  
-                  <div className="moccet-message-actions">
-                    <div className="moccet-message-action-btn" title="Reply in Thread">
-                      <i className="fa-solid fa-reply"></i>
-                    </div>
-                    <div className="moccet-message-action-btn" title="React">
-                      <i className="fa-solid fa-face-smile"></i>
-                    </div>
-                    <div className="moccet-message-action-btn" title="More Actions">
-                      <i className="fa-solid fa-ellipsis"></i>
-                    </div>
-                  </div>
-                  
-                        {message.reactions && message.reactions.length > 0 && (
-                          <div className="moccet-message-reactions">
-                            {Object.entries(
-                              message.reactions.reduce((acc, reaction) => {
-                                if (!acc[reaction.emoji]) {
-                                  acc[reaction.emoji] = { count: 0, userReacted: false };
-                                }
-                                acc[reaction.emoji].count++;
-                                if (reaction.userId === currentUser?.uid) {
-                                  acc[reaction.emoji].userReacted = true;
-                                }
-                                return acc;
-                              }, {})
-                            ).map(([emoji, data]) => (
-                              <div
-                                key={emoji}
-                                className={`moccet-message-reaction ${data.userReacted ? 'moccet-active' : ''}`}
-                                onClick={() => handleReactionToggle(message.id, emoji)}
-                              >
-                                {emoji} <span className="moccet-reaction-count">{data.count}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
                       </div>
                     </div>
                   );
@@ -907,6 +1203,39 @@ const MoccetChat = () => {
               </div>
             </div>
             
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              style={{ display: 'none' }}
+              onChange={handleFileSelect}
+              multiple
+              accept="image/*,video/*,application/*,text/*"
+            />
+            
+            {/* Upload progress */}
+            {uploadProgress && (
+              <div className="moccet-upload-progress">
+                <div className="moccet-upload-info">
+                  <i className="fa-solid fa-file"></i>
+                  <span className="moccet-upload-filename">{uploadProgress.name}</span>
+                  <span className="moccet-upload-speed">{uploadProgress.speed} KB/s</span>
+                </div>
+                <div className="moccet-progress-bar">
+                  <div 
+                    className="moccet-progress-fill" 
+                    style={{ width: `${uploadProgress.progress}%` }}
+                  />
+                </div>
+                <button 
+                  className="moccet-upload-cancel"
+                  onClick={() => setUploadProgress(null)}
+                >
+                  <i className="fa-solid fa-xmark"></i>
+                </button>
+              </div>
+            )}
+            
             <div className="moccet-input-container">
               <textarea 
                 ref={inputRef}
@@ -916,6 +1245,7 @@ const MoccetChat = () => {
                 value={inputValue}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyPress}
+                onPaste={handlePaste}
               />
               <div className="moccet-voice-input-button">
                 <i className="fa-solid fa-microphone"></i>
@@ -933,15 +1263,6 @@ const MoccetChat = () => {
               </button>
             </div>
             <div className="moccet-keyboard-shortcut">Press Enter to send, Shift+Enter for new line</div>
-            
-            {/* Hidden file input */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              onChange={handleFileSelect}
-              style={{ display: 'none' }}
-            />
             
             {/* Emoji Picker */}
             {showEmojiPicker && (
@@ -984,107 +1305,6 @@ const MoccetChat = () => {
           </div>
         </div>
       </div>
-      
-      {/* Create Channel Modal */}
-      {showCreateChannel && (
-        <div className="moccet-modal">
-          <div className="moccet-modal-content" style={{ maxWidth: '500px' }}>
-            <div className="moccet-modal-header">
-              <div className="moccet-modal-title">Create New Channel</div>
-              <div className="moccet-modal-close" onClick={() => {
-                setShowCreateChannel(false);
-                setNewChannelName('');
-                setNewChannelType('public');
-              }}>×</div>
-            </div>
-            <div className="moccet-modal-body">
-              <div style={{ marginBottom: '20px' }}>
-                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Channel Name</label>
-                <input
-                  type="text"
-                  value={newChannelName}
-                  onChange={(e) => setNewChannelName(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
-                  placeholder="e.g. project-updates"
-                  style={{
-                    width: '100%',
-                    padding: '10px',
-                    border: '1px solid #ccc',
-                    borderRadius: '5px',
-                    fontSize: '14px'
-                  }}
-                />
-                <small style={{ color: '#666', fontSize: '12px' }}>Lowercase letters, numbers, and hyphens only</small>
-              </div>
-              
-              <div style={{ marginBottom: '20px' }}>
-                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Channel Type</label>
-                <select
-                  value={newChannelType}
-                  onChange={(e) => setNewChannelType(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '10px',
-                    border: '1px solid #ccc',
-                    borderRadius: '5px',
-                    fontSize: '14px'
-                  }}
-                >
-                  <option value="public">Public - Anyone in the workspace can join</option>
-                  <option value="private">Private - Invite only</option>
-                </select>
-              </div>
-            </div>
-            <div className="moccet-modal-footer">
-              <button className="moccet-btn moccet-btn-secondary" onClick={() => {
-                setShowCreateChannel(false);
-                setNewChannelName('');
-                setNewChannelType('public');
-              }}>Cancel</button>
-              <button 
-                className="moccet-btn moccet-btn-primary" 
-                onClick={async () => {
-                  if (!newChannelName.trim() || !activeWorkspaceId) return;
-                  
-                  try {
-                    const channelData = {
-                      workspaceId: activeWorkspaceId,
-                      name: newChannelName,
-                      description: `${newChannelType === 'private' ? 'Private' : 'Public'} channel for ${newChannelName}`,
-                      type: newChannelType,
-                      createdBy: currentUser.uid,
-                      members: [currentUser.uid],
-                      admins: [currentUser.uid]
-                    };
-                    
-                    console.log('[MoccetChat] Creating channel:', channelData);
-                    const newChannel = await firestoreService.createChannel(channelData);
-                    console.log('[MoccetChat] Channel created:', newChannel);
-                    
-                    // Refresh channels list to ensure it's up to date
-                    await refreshChannels();
-                    
-                    // Switch to the new channel
-                    setActiveChannelId(newChannel.id);
-                    
-                    // Close modal and reset
-                    setShowCreateChannel(false);
-                    setNewChannelName('');
-                    setNewChannelType('public');
-                    
-                    alert(`Channel #${newChannelName} created successfully!`);
-                  } catch (error) {
-                    console.error('[MoccetChat] Error creating channel:', error);
-                    alert(`Failed to create channel: ${error.message}`);
-                  }
-                }}
-                disabled={!newChannelName.trim() || !activeWorkspaceId}
-              >
-                Create Channel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
       
       {/* Agent Directory Modal */}
       {showAgentDirectory && (
@@ -1157,6 +1377,134 @@ const MoccetChat = () => {
             <div className="moccet-modal-footer">
               <button className="moccet-btn moccet-btn-secondary" onClick={() => setShowAgentDirectory(false)}>Cancel</button>
               <button className="moccet-btn moccet-btn-primary">Add Selected</button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Image Lightbox */}
+      {showLightbox && lightboxImage && (
+        <div className="moccet-lightbox" onClick={closeLightbox}>
+          <div className="moccet-lightbox-content" onClick={(e) => e.stopPropagation()}>
+            <button className="moccet-lightbox-close" onClick={closeLightbox}>
+              <i className="fa-solid fa-xmark"></i>
+            </button>
+            <img src={lightboxImage.url} alt={lightboxImage.name} />
+            <div className="moccet-lightbox-info">
+              <div className="moccet-lightbox-filename">{lightboxImage.name}</div>
+              <a 
+                href={lightboxImage.url} 
+                download={lightboxImage.name} 
+                className="moccet-lightbox-download"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <i className="fa-solid fa-download"></i> Download
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Channel Creation Modal */}
+      {showCreateChannel && (
+        <div className="moccet-modal">
+          <div className="moccet-modal-content">
+            <div className="moccet-modal-header">
+              <div className="moccet-modal-title">Create Channel</div>
+              <div className="moccet-modal-close" onClick={() => setShowCreateChannel(false)}>×</div>
+            </div>
+            <div className="moccet-modal-body">
+              <div className="moccet-form-group">
+                <label>Channel Name</label>
+                <input
+                  type="text"
+                  className="moccet-input"
+                  placeholder="e.g., design-team"
+                  value={newChannelName}
+                  onChange={(e) => setNewChannelName(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleCreateChannel()}
+                />
+              </div>
+              <div className="moccet-form-group">
+                <label>Channel Type</label>
+                <div className="moccet-radio-group">
+                  <label className={`moccet-radio ${newChannelType === 'public' ? 'moccet-radio-selected' : ''}`}>
+                    <input
+                      type="radio"
+                      name="channelType"
+                      value="public"
+                      checked={newChannelType === 'public'}
+                      onChange={(e) => {
+                        console.log('Radio changed to:', e.target.value);
+                        setNewChannelType(e.target.value);
+                      }}
+                    />
+                    <div className="moccet-radio-content">
+                      <div className="moccet-radio-label">
+                        <i className="fa-solid fa-hashtag"></i> Public
+                      </div>
+                      <span className="moccet-radio-desc">Anyone in the workspace can join</span>
+                    </div>
+                  </label>
+                  <label className={`moccet-radio ${newChannelType === 'private' ? 'moccet-radio-selected' : ''}`}>
+                    <input
+                      type="radio"
+                      name="channelType"
+                      value="private"
+                      checked={newChannelType === 'private'}
+                      onChange={(e) => {
+                        console.log('Radio changed to:', e.target.value);
+                        setNewChannelType(e.target.value);
+                      }}
+                    />
+                    <div className="moccet-radio-content">
+                      <div className="moccet-radio-label">
+                        <i className="fa-solid fa-lock"></i> Private
+                      </div>
+                      <span className="moccet-radio-desc">Only invited members can join</span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div className="moccet-modal-footer" style={{
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: '10px',
+              padding: '20px',
+              borderTop: '1px solid rgba(0,0,0,0.1)'
+            }}>
+              <button 
+                className="moccet-btn moccet-btn-secondary" 
+                onClick={() => setShowCreateChannel(false)}
+                style={{
+                  padding: '8px 16px',
+                  border: '1px solid #ddd',
+                  borderRadius: '6px',
+                  background: 'white',
+                  cursor: 'pointer',
+                  fontSize: '14px'
+                }}
+              >
+                Cancel
+              </button>
+              <button 
+                className="moccet-btn moccet-btn-primary" 
+                onClick={handleCreateChannel}
+                disabled={!newChannelName.trim()}
+                style={{
+                  padding: '8px 16px',
+                  border: 'none',
+                  borderRadius: '6px',
+                  background: newChannelName.trim() ? '#6366f1' : '#ccc',
+                  color: 'white',
+                  cursor: newChannelName.trim() ? 'pointer' : 'not-allowed',
+                  fontSize: '14px',
+                  fontWeight: '500'
+                }}
+              >
+                Create Channel
+              </button>
             </div>
           </div>
         </div>

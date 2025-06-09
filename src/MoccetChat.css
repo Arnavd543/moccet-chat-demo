@@ -3381,3 +3381,225 @@ label,
   cursor: pointer;
 }
 
+/* Staged Attachments */
+.moccet-staged-attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: #f9fafb;
+  border-top: 1px solid #e5e7eb;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.moccet-dark-theme .moccet-staged-attachments {
+  background: #111827;
+  border-top-color: #374151;
+}
+
+.moccet-staged-attachment {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
+.moccet-dark-theme .moccet-staged-attachment {
+  background: #1f2937;
+  border-color: #374151;
+}
+
+.moccet-attachment-icon {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #eff6ff;
+  color: #3b82f6;
+  border-radius: 6px;
+  font-size: 16px;
+}
+
+.moccet-dark-theme .moccet-attachment-icon {
+  background: #1e3a8a;
+  color: #60a5fa;
+}
+
+.moccet-attachment-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.moccet-attachment-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: #1f2937;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.moccet-dark-theme .moccet-attachment-name {
+  color: #f3f4f6;
+}
+
+.moccet-attachment-size {
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: 2px;
+}
+
+.moccet-dark-theme .moccet-attachment-size {
+  color: #9ca3af;
+}
+
+.moccet-attachment-remove {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: #6b7280;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.moccet-attachment-remove:hover {
+  background: #fee2e2;
+  color: #ef4444;
+}
+
+.moccet-dark-theme .moccet-attachment-remove:hover {
+  background: #7f1d1d;
+  color: #f87171;
+}
+
+/* Message Attachments Display */
+.moccet-message-attachments {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.moccet-message-attachment {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+  max-width: 400px;
+}
+
+.moccet-dark-theme .moccet-message-attachment {
+  border-color: #374151;
+}
+
+.moccet-message-image {
+  max-width: 100%;
+  max-height: 400px;
+  cursor: pointer;
+  display: block;
+}
+
+.moccet-message-file {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: #f9fafb;
+}
+
+.moccet-dark-theme .moccet-message-file {
+  background: #111827;
+}
+
+.moccet-message-file-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #eff6ff;
+  color: #3b82f6;
+  border-radius: 8px;
+  font-size: 20px;
+}
+
+.moccet-dark-theme .moccet-message-file-icon {
+  background: #1e3a8a;
+  color: #60a5fa;
+}
+
+.moccet-message-file-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.moccet-message-file-name {
+  font-weight: 500;
+  color: #1f2937;
+  margin-bottom: 2px;
+}
+
+.moccet-dark-theme .moccet-message-file-name {
+  color: #f3f4f6;
+}
+
+.moccet-message-file-size {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.moccet-dark-theme .moccet-message-file-size {
+  color: #9ca3af;
+}
+
+.moccet-message-file-download {
+  padding: 6px 12px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.2s;
+}
+
+.moccet-message-file-download:hover {
+  background: #2563eb;
+}
+
+/* Send button with attachments */
+.moccet-send-button.has-attachments {
+  background: #10b981;
+  position: relative;
+}
+
+.moccet-send-button.has-attachments:hover:not(:disabled) {
+  background: #059669;
+}
+
+.moccet-attachment-count {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  background: #ef4444;
+  color: white;
+  font-size: 10px;
+  font-weight: bold;
+  min-width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 2px solid white;
+}
+

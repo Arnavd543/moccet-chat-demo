@@ -9,6 +9,18 @@ import {
 import { storage } from '../config/firebase';
 import { v4 as uuidv4 } from 'uuid';
 
+/**
+ * StorageService - Handles file uploads and storage operations
+ * 
+ * This service manages:
+ * - File validation (type and size)
+ * - Upload progress tracking
+ * - Secure file organization
+ * - Download URL generation
+ * - File deletion
+ * 
+ * @class
+ */
 class StorageService {
   constructor() {
     this.uploadTasks = new Map();
@@ -29,7 +41,12 @@ class StorageService {
     this.maxImageSize = 50 * 1024 * 1024; // 50MB
   }
 
-  // Validate file before upload
+  /**
+   * Validates file before upload
+   * @param {File} file - File to validate
+   * @param {string} type - File type category ('image', 'document', 'video', 'any')
+   * @throws {Error} If file validation fails
+   */
   validateFile(file, type = 'any') {
     // Check file size
     if (file.size > this.maxFileSize) {

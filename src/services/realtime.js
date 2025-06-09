@@ -10,6 +10,17 @@ import {
 } from 'firebase/database';
 import { realtimeDb } from '../config/firebase';
 
+/**
+ * RealtimeService - Handles real-time features using Firebase Realtime Database
+ * 
+ * This service manages:
+ * - User presence (online/offline status)
+ * - Typing indicators
+ * - Real-time status updates
+ * - Connection state management
+ * 
+ * @class
+ */
 class RealtimeService {
   constructor() {
     this.presenceRef = null;
@@ -17,7 +28,12 @@ class RealtimeService {
     this.presenceListeners = {};
   }
 
-  // Initialize user presence
+  /**
+   * Initializes user presence tracking
+   * Sets up online/offline status with automatic disconnect handling
+   * @param {string} userId - The user ID to track
+   * @returns {Promise<void>}
+   */
   async initializePresence(userId) {
     const userStatusRef = ref(realtimeDb, `status/${userId}`);
     const userPresenceRef = ref(realtimeDb, `presence/${userId}`);

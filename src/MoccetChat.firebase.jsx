@@ -5,10 +5,7 @@ import { useMessage } from './contexts/MessageContext';
 import { firestoreService } from './services/firestore';
 import { realtimeService } from './services/realtime';
 import { usePresence } from './hooks/usePresence';
-import UnifiedDebugPanel from './components/UnifiedDebugPanel';
 import { createSimpleWorkspace, archiveAllUserWorkspaces } from './services/firestoreSimple';
-import { messageDebugger } from './utils/messageDebugger';
-import './utils/quickTest'; // Import test utilities
 
 
 const MoccetChatFirebase = () => {
@@ -34,6 +31,7 @@ const MoccetChatFirebase = () => {
   const [isInitializing, setIsInitializing] = useState(true);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [stagedAttachments, setStagedAttachments] = useState([]);
   
   // Message context - get full context
   const messageContext = useMessage();
@@ -311,9 +309,12 @@ const MoccetChatFirebase = () => {
     }
   };
 
-  // Handle send message
+  // Handle send message with attachments
   const handleSendMessage = async () => {
-    if (inputValue.trim() && activeChannelId) {
+    const hasContent = inputValue.trim();
+    const hasAttachments = stagedAttachments.length > 0;
+    
+    if ((hasContent || hasAttachments) && activeChannelId && activeWorkspaceId) {
       try {
         // Validate channel exists
         const channelExists = channels.some(c => c.id === activeChannelId);
@@ -332,37 +333,76 @@ const MoccetChatFirebase = () => {
         }
         realtimeService.setTypingStatus(activeChannelId, currentUser.uid, false);
         
-        // Send message to Firebase
         console.log('[MoccetChat] Preparing to send message:', {
           channelId: activeChannelId,
           channelName: channels.find(c => c.id === activeChannelId)?.name,
           workspaceId: activeWorkspaceId,
           content: inputValue.trim(),
           contentLength: inputValue.trim().length,
+          attachmentCount: stagedAttachments.length,
           currentUser: currentUser.uid
         });
         
-        // Ensure we have a valid workspace context
-        if (!activeWorkspaceId) {
-          console.error('[MoccetChat] No active workspace');
-          alert('No active workspace. Please select or create a workspace.');
-          return;
+        // If we have attachments, upload them first
+        if (hasAttachments) {
+          for (const attachment of stagedAttachments) {
+            try {
+              // Update UI to show uploading
+              setStagedAttachments(prev => 
+                prev.map(att => att.id === attachment.id 
+                  ? { ...att, uploading: true } 
+                  : att
+                )
+              );
+              
+              // Upload and send each file with the message content
+              await uploadFileAndSend(
+                activeChannelId,
+                activeWorkspaceId,
+                attachment.file,
+                hasContent ? inputValue.trim() : '', // Include message if present
+                (progress) => {
+                  // Update progress
+                  setStagedAttachments(prev => 
+                    prev.map(att => att.id === attachment.id 
+                      ? { ...att, progress: progress.progress } 
+                      : att
+                    )
+                  );
+                }
+              );
+            } catch (error) {
+              console.error('Error uploading attachment:', error);
+              setStagedAttachments(prev => 
+                prev.map(att => att.id === attachment.id 
+                  ? { ...att, uploading: false, error: error.message } 
+                  : att
+                )
+              );
+              throw error;
+            }
+          }
+          
+          // Clear staged attachments after successful upload
+          setStagedAttachments([]);
+        } else {
+          // No attachments, just send the message
+          console.log('[MoccetChat] Calling sendMessage...');
+          const result = await sendMessage(activeChannelId, inputValue.trim(), activeWorkspaceId);
+          if (result) {
+            console.log('[MoccetChat] Message sent successfully:', {
+              messageId: result.id,
+              channelId: result.channelId,
+              content: result.content?.substring(0, 50)
+            });
+          } else {
+            console.error('[MoccetChat] Message send returned no result');
+          }
         }
         
-        console.log('[MoccetChat] Calling sendMessage...');
-        const result = await sendMessage(activeChannelId, inputValue.trim(), activeWorkspaceId);
-        if (result) {
-          console.log('[MoccetChat] Message sent successfully:', {
-            messageId: result.id,
-            channelId: result.channelId,
-            content: result.content?.substring(0, 50)
-          });
-          setInputValue('');
-          if (inputRef.current) {
-            inputRef.current.style.height = 'auto';
-          }
-        } else {
-          console.error('[MoccetChat] Message send returned no result');
+        setInputValue('');
+        if (inputRef.current) {
+          inputRef.current.style.height = 'auto';
         }
       } catch (error) {
         console.error('[MoccetChat] Error sending message:', error);
@@ -370,8 +410,10 @@ const MoccetChatFirebase = () => {
       }
     } else {
       console.warn('[MoccetChat] Cannot send message:', {
-        hasContent: !!inputValue.trim(),
+        hasContent,
+        hasAttachments,
         hasChannelId: !!activeChannelId,
+        hasWorkspaceId: !!activeWorkspaceId,
         activeChannelId
       });
     }
@@ -393,7 +435,7 @@ const MoccetChatFirebase = () => {
   };
 
 
-  // File upload handlers
+  // File upload handlers - stage files instead of sending immediately
   const handleFileSelect = (e) => {
     const files = Array.from(e.target.files);
     handleFiles(files);
@@ -402,30 +444,29 @@ const MoccetChatFirebase = () => {
   const handleFiles = async (files) => {
     if (!activeChannelId || !activeWorkspaceId) return;
 
-    for (const file of files) {
-      try {
-        setUploadProgress({ name: file.name, progress: 0 });
-        
-        await uploadFileAndSend(
-          activeChannelId,
-          activeWorkspaceId,
-          file,
-          '',
-          (progress) => {
-            setUploadProgress({
-              name: file.name,
-              ...progress
-            });
-          }
-        );
-        
-        setUploadProgress(null);
-      } catch (error) {
-        console.error('Error uploading file:', error);
-        setUploadProgress(null);
-        alert(`Failed to upload ${file.name}: ${error.message}`);
-      }
+    // Stage the files instead of uploading immediately
+    const newAttachments = files.map(file => ({
+      file,
+      id: Date.now() + Math.random(),
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      uploading: false,
+      progress: 0,
+      error: null
+    }));
+
+    setStagedAttachments(prev => [...prev, ...newAttachments]);
+    
+    // Clear the file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
+  };
+
+  // Remove staged attachment
+  const removeStagedAttachment = (id) => {
+    setStagedAttachments(prev => prev.filter(att => att.id !== id));
   };
 
   // Drag and drop handlers
@@ -938,6 +979,80 @@ const MoccetChatFirebase = () => {
                             {message.content}
                           </div>
                           
+                          {/* Display attachments */}
+                          {message.attachments && message.attachments.length > 0 && (
+                            <div className="moccet-message-attachments" style={{ marginTop: '8px' }}>
+                              {message.attachments.map((attachment, idx) => {
+                                const isImage = attachment.type?.startsWith('image/');
+                                
+                                if (isImage) {
+                                  return (
+                                    <div key={idx} className="moccet-message-attachment" style={{ marginBottom: '8px' }}>
+                                      <img 
+                                        src={attachment.url} 
+                                        alt={attachment.name}
+                                        style={{
+                                          maxWidth: '300px',
+                                          maxHeight: '300px',
+                                          borderRadius: '8px',
+                                          cursor: 'pointer',
+                                          display: 'block'
+                                        }}
+                                        onClick={() => window.open(attachment.url, '_blank')}
+                                      />
+                                    </div>
+                                  );
+                                } else {
+                                  return (
+                                    <div key={idx} className="moccet-message-attachment" style={{ marginBottom: '8px' }}>
+                                      <div style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        padding: '12px',
+                                        background: 'rgba(0,0,0,0.05)',
+                                        borderRadius: '8px',
+                                        gap: '12px'
+                                      }}>
+                                        <div style={{
+                                          width: '40px',
+                                          height: '40px',
+                                          background: '#7c3aed',
+                                          borderRadius: '8px',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          color: 'white'
+                                        }}>
+                                          <i className="fa-solid fa-file"></i>
+                                        </div>
+                                        <div style={{ flex: 1 }}>
+                                          <div style={{ fontWeight: '500', marginBottom: '4px' }}>{attachment.name}</div>
+                                          <div style={{ fontSize: '12px', opacity: 0.7 }}>
+                                            {(attachment.size / 1024 / 1024).toFixed(2)} MB
+                                          </div>
+                                        </div>
+                                        <a 
+                                          href={attachment.url} 
+                                          download={attachment.name}
+                                          style={{
+                                            padding: '6px 12px',
+                                            background: '#7c3aed',
+                                            color: 'white',
+                                            borderRadius: '4px',
+                                            textDecoration: 'none',
+                                            fontSize: '12px'
+                                          }}
+                                        >
+                                          Download
+                                        </a>
+                                      </div>
+                                    </div>
+                                  );
+                                }
+                              })}
+                            </div>
+                          )}
+                          
                           {/* Message status indicator */}
                           {isCurrentUser && message.status && (
                             <div style={{
@@ -1007,6 +1122,35 @@ const MoccetChatFirebase = () => {
                     Add Context
                   </div>
                 </div>
+              </div>
+            )}
+            
+            {/* Staged Attachments */}
+            {stagedAttachments.length > 0 && (
+              <div className="moccet-staged-attachments">
+                {stagedAttachments.map(attachment => (
+                  <div key={attachment.id} className="moccet-staged-attachment">
+                    <div className="moccet-attachment-icon">
+                      <i className="fa-solid fa-file"></i>
+                    </div>
+                    <div className="moccet-attachment-info">
+                      <div className="moccet-attachment-name">{attachment.name}</div>
+                      <div className="moccet-attachment-size">
+                        {(attachment.size / 1024 / 1024).toFixed(2)} MB
+                        {attachment.uploading && ` • ${attachment.progress}%`}
+                        {attachment.error && ` • Error: ${attachment.error}`}
+                      </div>
+                    </div>
+                    {!attachment.uploading && (
+                      <button 
+                        className="moccet-attachment-remove"
+                        onClick={() => removeStagedAttachment(attachment.id)}
+                      >
+                        <i className="fa-solid fa-times"></i>
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
             
@@ -1084,8 +1228,16 @@ const MoccetChatFirebase = () => {
               <div className="moccet-voice-input-button">
                 <i className="fa-solid fa-microphone"></i>
               </div>
-              <button className="moccet-send-button" onClick={handleSendMessage} disabled={!inputValue.trim()}>
+              <button 
+                className={`moccet-send-button ${stagedAttachments.length > 0 ? 'has-attachments' : ''}`}
+                onClick={handleSendMessage} 
+                disabled={(!inputValue.trim() && stagedAttachments.length === 0) || !activeChannelId || !activeWorkspaceId}
+                title={stagedAttachments.length > 0 ? `Send with ${stagedAttachments.length} attachment(s)` : 'Send message'}
+              >
                 <i className="fa-solid fa-paper-plane"></i>
+                {stagedAttachments.length > 0 && (
+                  <span className="moccet-attachment-count">{stagedAttachments.length}</span>
+                )}
               </button>
             </div>
             <div className="moccet-keyboard-shortcut">Press Enter to send, Shift+Enter for new line</div>
@@ -1336,11 +1488,6 @@ const MoccetChatFirebase = () => {
         </div>
       )}
       
-      {/* Unified Debug Panel */}
-      <UnifiedDebugPanel 
-        activeChannelId={activeChannelId} 
-        activeWorkspaceId={activeWorkspaceId} 
-      />
       
       {/* Profile Modal */}
       {showProfileModal && (

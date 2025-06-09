@@ -25,8 +25,25 @@ import {
   createDirectMessage as createDirectMessageModel 
 } from '../models';
 
+/**
+ * FirestoreService - Main service for all Firestore database operations
+ * 
+ * This service handles all interactions with Firebase Firestore including:
+ * - Workspace management
+ * - Channel operations
+ * - Message CRUD operations
+ * - Direct message handling
+ * - User profile management
+ * - Real-time subscriptions
+ * 
+ * @class
+ */
 class FirestoreService {
-  // Helper to validate channel exists
+  /**
+   * Validates if a channel exists in the database
+   * @param {string} channelId - The channel ID to validate
+   * @returns {Promise<boolean>} True if channel exists, false otherwise
+   */
   async validateChannel(channelId) {
     try {
       const channelRef = doc(firestore, 'channels', channelId);
@@ -37,7 +54,18 @@ class FirestoreService {
       return false;
     }
   }
-  // Workspace operations
+  // ============ Workspace Operations ============
+  
+  /**
+   * Creates a new workspace with default channels
+   * @param {Object} workspaceData - Workspace configuration
+   * @param {string} workspaceData.name - Workspace name
+   * @param {string} workspaceData.description - Workspace description
+   * @param {string} workspaceData.ownerId - User ID of the workspace owner
+   * @param {string[]} workspaceData.members - Initial member IDs
+   * @param {string[]} workspaceData.admins - Initial admin IDs
+   * @returns {Promise<Object>} Created workspace object with ID
+   */
   async createWorkspace(workspaceData) {
     try {
       console.log('FirestoreService.createWorkspace called with:', workspaceData);

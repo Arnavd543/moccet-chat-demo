@@ -288,7 +288,7 @@ export const MessageProvider = ({ children }) => {
         path: uploadResult.path,
         uploadedBy: currentUser.uid,
         uploadedAt: uploadResult.uploadedAt,
-        metadata: uploadResult.metadata
+        metadata: {} // Don't include Firebase Storage metadata as it may contain undefined values
       });
 
       // Determine message type based on file category
