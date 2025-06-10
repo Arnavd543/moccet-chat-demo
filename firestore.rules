@@ -33,7 +33,8 @@ service cloud.firestore {
     function canCreateMessage() {
       return isSignedIn() && 
              (request.resource.data.userId == request.auth.uid ||
-              request.resource.data.senderId == request.auth.uid);
+              request.resource.data.senderId == request.auth.uid ||
+              (request.resource.data.keys().hasAll(['isAI']) && request.resource.data.isAI == true));
     }
     
     function isMessageOwner() {
@@ -97,7 +98,7 @@ service cloud.firestore {
       // Channel messages
       match /messages/{messageId} {
         allow read: if isSignedIn();
-        allow create: if isSignedIn() && canCreateMessage();
+        allow create: if isSignedIn();
         allow update: if isMessageOwner();
         allow delete: if isMessageOwner();
         
@@ -126,7 +127,7 @@ service cloud.firestore {
       
       match /messages/{messageId} {
         allow read: if isSignedIn();
-        allow create: if isSignedIn() && canCreateMessage();
+        allow create: if isSignedIn();
         allow update: if isMessageOwner();
         allow delete: if isMessageOwner();
       }
@@ -144,6 +145,22 @@ service cloud.firestore {
     // Rate limiting documents
     match /rateLimits/{document} {
       allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if false;
+    }
+    
+    // AI Analytics
+    match /ai_analytics/{analyticsId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if false; // Analytics are immutable
+      allow delete: if false;
+    }
+    
+    // AI User Stats
+    match /ai_user_stats/{userId} {
+      allow read: if isSignedIn() && request.auth.uid == userId;
       allow create: if isSignedIn();
       allow update: if isSignedIn();
       allow delete: if false;

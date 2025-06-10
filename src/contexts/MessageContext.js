@@ -30,10 +30,21 @@ export const MessageProvider = ({ children }) => {
   // }, [messages]);
 
   // Send message - simplified without optimistic updates
-  const sendMessage = useCallback(async (channelId, content, workspaceId = null, type = 'text', attachments = []) => {
-    console.log('[MessageContext] sendMessage called:', { channelId, content, workspaceId, type });
+  const sendMessage = useCallback(async (channelId, content, workspaceId = null, typeOrMetadata = 'text', attachments = []) => {
+    // Handle both old signature (type as string) and new signature (metadata object)
+    let type = 'text';
+    let metadata = {};
     
-    if (!currentUser) {
+    if (typeof typeOrMetadata === 'string') {
+      type = typeOrMetadata;
+    } else if (typeof typeOrMetadata === 'object' && typeOrMetadata !== null) {
+      metadata = typeOrMetadata;
+      type = metadata.type || 'text';
+    }
+    
+    console.log('[MessageContext] sendMessage called:', { channelId, content, workspaceId, type, metadata });
+    
+    if (!currentUser && !metadata.isAI) {
       console.error('[MessageContext] Cannot send message: no current user');
       return;
     }
@@ -43,9 +54,10 @@ export const MessageProvider = ({ children }) => {
       return;
     }
     
-    // Use currentUser data if userProfile is not available
-    const displayName = userProfile?.displayName || currentUser.displayName || currentUser.email || 'Unknown User';
-    const photoURL = userProfile?.photoURL || currentUser.photoURL || null;
+    // Use AI metadata if provided, otherwise use current user data
+    const displayName = metadata.senderName || userProfile?.displayName || currentUser?.displayName || currentUser?.email || 'Unknown User';
+    const photoURL = metadata.senderAvatar || userProfile?.photoURL || currentUser?.photoURL || null;
+    const userId = metadata.isAI ? 'moccet-ai' : currentUser.uid;
 
     try {
       // Send to Firestore
@@ -55,18 +67,22 @@ export const MessageProvider = ({ children }) => {
       const sentMessage = await firestoreService.sendMessage(
         {
           channelId,
-          userId: currentUser.uid,
+          userId: userId,
           type,
           content,
           attachments,
-          workspaceId: finalWorkspaceId
+          workspaceId: finalWorkspaceId,
+          isAI: metadata.isAI || false,
+          aiUsage: metadata.usage,
+          cached: metadata.cached,
+          isError: metadata.isError
         },
         {
-          uid: currentUser.uid,
+          uid: userId,
           displayName: displayName,
           photoURL: photoURL,
-          email: currentUser.email,
-          status: userProfile?.status || 'online'
+          email: metadata.isAI ? 'ai@moccet.com' : currentUser?.email,
+          status: metadata.isAI ? 'online' : (userProfile?.status || 'online')
         }
       );
       

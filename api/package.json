@@ -1,0 +1,11 @@
+{
+  "name": "moccet-chat-api",
+  "version": "1.0.0",
+  "description": "Vercel API functions for Moccet Chat",
+  "main": "index.js",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.24.3",
+    "cors": "^2.8.5",
+    "firebase-admin": "^13.4.0"
+  }
+}

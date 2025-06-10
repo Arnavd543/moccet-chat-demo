@@ -3603,3 +3603,104 @@ label,
   border: 2px solid white;
 }
 
+/* AI Mode Styles */
+.moccet-ai-mode-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 12px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.moccet-ai-mode-indicator i {
+  font-size: 16px;
+}
+
+.moccet-ai-responding {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: #f3f4f6;
+  color: #4b5563;
+  font-size: 14px;
+  margin-bottom: 12px;
+  border-radius: 8px;
+}
+
+.moccet-dark-theme .moccet-ai-responding {
+  background: #1f2937;
+  color: #d1d5db;
+}
+
+.moccet-ai-responding-spinner {
+  color: #667eea;
+}
+
+.moccet-input-container.ai-mode {
+  border-color: #667eea;
+  box-shadow: 0 0 0 1px #667eea;
+}
+
+.moccet-input-container.ai-responding {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.moccet-send-button.ai-mode {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.moccet-send-button.ai-mode:hover:not(:disabled) {
+  background: linear-gradient(135deg, #5a5cd6 0%, #653a8e 100%);
+}
+
+/* AI Message Styles */
+.moccet-message.ai-message {
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0e7ff 100%);
+  border-left: 3px solid #667eea;
+}
+
+.moccet-dark-theme .moccet-message.ai-message {
+  background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
+  border-left-color: #764ba2;
+}
+
+.moccet-message.ai-message .moccet-message-header {
+  color: #667eea;
+}
+
+.moccet-dark-theme .moccet-message.ai-message .moccet-message-header {
+  color: #a78bfa;
+}
+
+.moccet-message.ai-error {
+  background: #fef2f2;
+  border-left: 3px solid #ef4444;
+}
+
+.moccet-dark-theme .moccet-message.ai-error {
+  background: #450a0a;
+  border-left-color: #dc2626;
+}
+
+/* Command Suggestions */
+.moccet-command-item {
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.moccet-command-item:hover {
+  background: #f3f4f6;
+}
+
+.moccet-dark-theme .moccet-command-item:hover {
+  background: #374151;
+}
+

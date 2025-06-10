@@ -5,6 +5,7 @@
 /.pnp
 .pnp.js
 
+.claude
 # testing
 /coverage
 
@@ -39,3 +40,9 @@ pubsub-debug.log
 # Functions
 functions/node_modules/
 functions/.env
+.vercel
+.env.local
+
+# API
+api/.env
+api/node_modules/

@@ -5,7 +5,9 @@ import { useMessage } from './contexts/MessageContext';
 import { firestoreService } from './services/firestore';
 import { realtimeService } from './services/realtime';
 import { usePresence } from './hooks/usePresence';
-import { createSimpleWorkspace, archiveAllUserWorkspaces } from './services/firestoreSimple';
+import aiService from './services/aiService';
+import AIAnalytics from './components/AIAnalytics';
+import AIContextMenu from './components/AIContextMenu';
 
 /**
  * MoccetChat - Main chat interface component
@@ -32,6 +34,7 @@ const MoccetChat = () => {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showCreateChannel, setShowCreateChannel] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [showAIAnalytics, setShowAIAnalytics] = useState(false);
   
   // ============ Data State Management ============
   const [inputValue, setInputValue] = useState('');
@@ -44,14 +47,18 @@ const MoccetChat = () => {
   const [newChannelType, setNewChannelType] = useState('public');
   const [stagedAttachments, setStagedAttachments] = useState([]);
   
+  // ============ AI State Management ============
+  const [isAIMode, setIsAIMode] = useState(false);
+  const [isAIResponding, setIsAIResponding] = useState(false);
+  const [commandSuggestions, setCommandSuggestions] = useState([]);
+  const [contextMenu, setContextMenu] = useState({ isOpen: false, position: null, message: null });
+  
   // ============ Message Context & Operations ============
   const messageContext = useMessage();
   const { 
     messages, 
     loadingStates,
     sendMessage, 
-    addReaction, 
-    removeReaction,
     uploadFileAndSend,
     subscribeToChannel,
     unsubscribeFromChannel
@@ -82,14 +89,6 @@ const MoccetChat = () => {
   // ============ Constants ============
   // Available emojis for the emoji picker
   const emojis = ['😊', '😂', '🙂', '😍', '😎', '🤔', '🤗', '🤫', '😮', '😥', '😴', '😫', '🤯', '🥳', '😇', '👍', '👎', '👏', '🙏', '🔥', '❤️', '🚀', '🎉', '💯'];
-
-  // Smart commands available with "/" prefix
-  const smartCommandsList = [
-    { icon: 'fa-robot', name: 'Agent Directory', desc: 'Browse and add AI agents to your workspace', shortcut: '/agent' },
-    { icon: 'fa-wand-magic-sparkles', name: 'AI Generate', desc: 'Generate content with AI', shortcut: '/ai' },
-    { icon: 'fa-list-check', name: 'Create Task', desc: 'Add a new task to your project', shortcut: '/task' },
-    { icon: 'fa-code', name: 'Code Block', desc: 'Insert formatted code snippet', shortcut: '/code' }
-  ];
 
   // ============ Utility Functions ============
   /**
@@ -206,7 +205,7 @@ const MoccetChat = () => {
     };
     
     loadChannels();
-  }, [activeWorkspaceId, currentUser]); // Removed activeChannelId to prevent infinite loop
+  }, [activeWorkspaceId, currentUser, activeChannelId]);
   
   // Subscribe to messages when channel changes
   useEffect(() => {
@@ -291,14 +290,26 @@ const MoccetChat = () => {
    * - Shows smart commands when "/" is typed
    * - Auto-resizes textarea
    * - Manages typing indicators
+   * - Detects AI commands
    * @param {Event} e - Input change event
    */
   const handleInputChange = (e) => {
     const value = e.target.value;
     setInputValue(value);
     
-    // Show smart commands if input starts with '/'
-    setShowSmartCommands(value.startsWith('/'));
+    // Check for AI triggers
+    const aiTrigger = aiService.checkAITrigger(value);
+    setIsAIMode(aiTrigger.triggered);
+    
+    // Get command suggestions if typing a command
+    if (value.startsWith('/')) {
+      const suggestions = aiService.getCommandSuggestions(value);
+      setCommandSuggestions(suggestions);
+      setShowSmartCommands(suggestions.length > 0);
+    } else {
+      setShowSmartCommands(false);
+      setCommandSuggestions([]);
+    }
     
     // Auto-resize textarea
     e.target.style.height = 'auto';
@@ -332,6 +343,7 @@ const MoccetChat = () => {
    * Handles sending messages with or without attachments
    * - Validates channel and workspace
    * - Handles file uploads if attachments are staged
+   * - Processes AI commands if detected
    * - Clears input and typing indicators after sending
    */
   const handleSendMessage = async () => {
@@ -356,6 +368,98 @@ const MoccetChat = () => {
           clearTimeout(typingTimeoutRef.current);
         }
         realtimeService.setTypingStatus(activeChannelId, currentUser.uid, false);
+        
+        // Check if this is an AI command
+        if (isAIMode && hasContent) {
+          setIsAIResponding(true);
+          
+          try {
+            // First, send the user's message
+            await sendMessage(activeChannelId, inputValue.trim(), activeWorkspaceId);
+            
+            // Clear input immediately
+            setInputValue('');
+            if (inputRef.current) {
+              inputRef.current.style.height = 'auto';
+            }
+            
+            // Process AI command
+            const aiTrigger = aiService.checkAITrigger(inputValue.trim());
+            const activeChannel = channels.find(c => c.id === activeChannelId);
+            
+            // Process smart commands with context
+            let processedQuery = aiTrigger.query;
+            if (aiTrigger.command && aiTrigger.command !== 'ai' && aiTrigger.command !== 'mention') {
+              processedQuery = aiService.processSmartCommand(
+                aiTrigger.command,
+                aiTrigger.query,
+                currentMessages
+              );
+            }
+            
+            // Send to AI service
+            const aiResponse = await aiService.sendMessage(
+              processedQuery,
+              currentMessages.slice(-10), // Last 10 messages for context
+              {
+                channelId: activeChannelId,
+                channelName: activeChannel?.name,
+                workspaceId: activeWorkspaceId
+              },
+              aiTrigger.command || 'ai' // Pass the command for analytics
+            );
+            
+            // Format and send AI response
+            const formattedResponse = aiService.formatAIResponse(
+              aiResponse.content,
+              aiResponse.usage
+            );
+            
+            // Send AI response as a message
+            await sendMessage(
+              activeChannelId,
+              formattedResponse.content,
+              activeWorkspaceId,
+              {
+                isAI: true,
+                senderName: 'Moccet Assistant',
+                senderAvatar: '/moccet-ai-avatar.png',
+                usage: aiResponse.usage,
+                cached: aiResponse.cached
+              }
+            );
+            
+          } catch (error) {
+            console.error('[MoccetChat] AI Error:', error);
+            
+            // Send error message
+            let errorMessage = 'Sorry, I encountered an error processing your request.';
+            if (error.code === 'RATE_LIMIT') {
+              errorMessage = `Rate limit exceeded. Please try again in ${error.retryAfter} seconds.`;
+            } else if (error.code === 'TIMEOUT') {
+              errorMessage = 'The AI request timed out. Please try again.';
+            } else if (error.code === 'NETWORK') {
+              errorMessage = 'No internet connection. Please check your network and try again.';
+            }
+            
+            await sendMessage(
+              activeChannelId,
+              errorMessage,
+              activeWorkspaceId,
+              {
+                isAI: true,
+                senderName: 'Moccet Assistant',
+                senderAvatar: '/moccet-ai-avatar.png',
+                isError: true
+              }
+            );
+          } finally {
+            setIsAIResponding(false);
+            setIsAIMode(false);
+          }
+          
+          return; // Exit early for AI commands
+        }
         
         console.log('[MoccetChat] Preparing to send message:', {
           channelId: activeChannelId,
@@ -448,6 +552,23 @@ const MoccetChat = () => {
    * @param {KeyboardEvent} e - Keyboard event
    */
   const handleKeyPress = (e) => {
+    // Handle Escape to cancel AI mode
+    if (e.key === 'Escape' && isAIMode) {
+      e.preventDefault();
+      setIsAIMode(false);
+      setInputValue('');
+      return;
+    }
+    
+    // Handle Ctrl+Space for AI assist
+    if (e.key === ' ' && e.ctrlKey) {
+      e.preventDefault();
+      setInputValue('/ai ');
+      const aiTrigger = aiService.checkAITrigger('/ai ');
+      setIsAIMode(aiTrigger.triggered);
+      return;
+    }
+    
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
@@ -605,6 +726,45 @@ const MoccetChat = () => {
     } catch (error) {
       console.error('Error creating channel:', error);
       alert('Failed to create channel: ' + error.message);
+    }
+  };
+
+  // Handle context menu for messages
+  const handleMessageContextMenu = (e, message) => {
+    e.preventDefault();
+    setContextMenu({
+      isOpen: true,
+      position: { x: e.clientX, y: e.clientY },
+      message
+    });
+  };
+
+  // Handle AI action from context menu
+  const handleAIAction = async (action, message) => {
+    try {
+      const result = await aiService.processMessageAction(action, message, {
+        channelInfo: {
+          channelId: activeChannelId,
+          channelName: channels.find(c => c.id === activeChannelId)?.name,
+          workspaceId: activeWorkspaceId
+        }
+      });
+
+      // Send the AI result as a new message
+      await sendMessage(
+        activeChannelId,
+        `**${action.charAt(0).toUpperCase() + action.slice(1)} Result:**\n\n${result}`,
+        activeWorkspaceId,
+        {
+          isAI: true,
+          senderName: 'Moccet Assistant',
+          senderAvatar: '/moccet-ai-avatar.svg',
+          replyTo: message.id
+        }
+      );
+    } catch (error) {
+      console.error('Error processing AI action:', error);
+      alert('Failed to process AI action: ' + error.message);
     }
   };
 
@@ -869,6 +1029,10 @@ const MoccetChat = () => {
               <i className="fa-solid fa-robot"></i>
               <div className="moccet-tooltip">Agent Directory</div>
             </div>
+            <div className="moccet-header-button" onClick={() => setShowAIAnalytics(true)}>
+              <i className="fa-solid fa-chart-line"></i>
+              <div className="moccet-tooltip">AI Analytics</div>
+            </div>
             <div className="moccet-header-button">
               <i className="fa-solid fa-magnifying-glass"></i>
               <div className="moccet-tooltip">Search</div>
@@ -922,12 +1086,20 @@ const MoccetChat = () => {
               <>
                 {currentMessages.filter(message => message.id).map((message) => {
                   const isCurrentUser = message.userId === currentUser?.uid || message.senderId === currentUser?.uid;
+                  const isAI = message.isAI || message.userId === 'moccet-ai';
                   const messageTime = message.createdAt?.toDate ? 
                     new Date(message.createdAt.toDate()).toLocaleTimeString('en-US', { 
                       hour: 'numeric', 
                       minute: '2-digit',
                       hour12: true 
                     }) : 'Just now';
+                  
+                  // Determine message classes
+                  const messageClasses = [
+                    'moccet-message',
+                    isAI && 'ai-message',
+                    message.isError && 'ai-error'
+                  ].filter(Boolean).join(' ');
                   
                   return (
                     <div key={message.id} style={{
@@ -948,9 +1120,15 @@ const MoccetChat = () => {
                           borderRadius: '50%',
                           overflow: 'hidden',
                           flexShrink: 0,
-                          background: '#e5e7eb'
+                          background: isAI ? 'transparent' : '#e5e7eb'
                         }}>
-                          {message.senderAvatar || message.sender?.photoURL ? (
+                          {isAI ? (
+                            <img 
+                              src="/moccet-ai-avatar.svg" 
+                              alt="AI Avatar" 
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            />
+                          ) : message.senderAvatar || message.sender?.photoURL ? (
                             <img 
                               src={message.senderAvatar || message.sender?.photoURL} 
                               alt="Avatar" 
@@ -970,25 +1148,31 @@ const MoccetChat = () => {
                             </div>
                           )}
                         </div>
-                        <div style={{
-                          background: isCurrentUser ? '#7c3aed' : 'white',
-                          color: isCurrentUser ? 'white' : '#111827',
-                          padding: '12px 16px',
-                          borderRadius: '12px',
-                          boxShadow: '0 1px 2px rgba(0, 0, 0, 0.1)',
-                          border: isCurrentUser ? 'none' : '1px solid #e5e7eb',
-                          minWidth: '100px'
-                        }}>
-                          <div style={{
+                        <div 
+                          className={messageClasses} 
+                          style={{
+                            background: isAI ? undefined : (isCurrentUser ? '#7c3aed' : 'white'),
+                            color: isAI ? undefined : (isCurrentUser ? 'white' : '#111827'),
+                            padding: '12px 16px',
+                            borderRadius: '12px',
+                            boxShadow: isAI ? undefined : '0 1px 2px rgba(0, 0, 0, 0.1)',
+                            border: isAI ? undefined : (isCurrentUser ? 'none' : '1px solid #e5e7eb'),
+                            minWidth: '100px',
+                            cursor: 'context-menu'
+                          }}
+                          onContextMenu={(e) => handleMessageContextMenu(e, message)}
+                        >
+                          <div className="moccet-message-header" style={{
                             fontSize: '12px',
-                            opacity: 0.8,
+                            opacity: isAI ? 1 : 0.8,
                             marginBottom: '4px',
                             display: 'flex',
                             justifyContent: 'space-between',
                             alignItems: 'center',
                             gap: '8px'
                           }}>
-                            <div style={{ fontWeight: '600' }}>
+                            <div style={{ fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              {isAI && <i className="fa-solid fa-robot" style={{ fontSize: '12px' }}></i>}
                               {message.senderName || message.sender?.displayName || message.sender?.email || 'Unknown User'}
                             </div>
                             <div>{messageTime}</div>
@@ -1000,6 +1184,20 @@ const MoccetChat = () => {
                           }}>
                             {message.content}
                           </div>
+                          
+                          {/* Display AI usage info if available */}
+                          {isAI && message.aiUsage && (
+                            <div style={{
+                              fontSize: '11px',
+                              opacity: 0.6,
+                              marginTop: '8px',
+                              display: 'flex',
+                              gap: '12px'
+                            }}>
+                              <span>Tokens: {message.aiUsage.total_tokens}</span>
+                              {message.cached && <span>Cached</span>}
+                            </div>
+                          )}
                           
                           {/* Display attachments */}
                           {message.attachments && message.attachments.length > 0 && (
@@ -1196,7 +1394,15 @@ const MoccetChat = () => {
                 </div>
               </div>
               <div className="moccet-tools-right">
-                <button className="moccet-ai-assist-btn">
+                <button 
+                  className="moccet-ai-assist-btn"
+                  onClick={() => {
+                    setInputValue('/ai ');
+                    const aiTrigger = aiService.checkAITrigger('/ai ');
+                    setIsAIMode(aiTrigger.triggered);
+                    inputRef.current?.focus();
+                  }}
+                >
                   <i className="fa-solid fa-wand-magic-sparkles moccet-icon"></i>
                   AI Assist
                 </button>
@@ -1236,33 +1442,54 @@ const MoccetChat = () => {
               </div>
             )}
             
-            <div className="moccet-input-container">
+            {/* AI Mode Indicator */}
+            {isAIMode && (
+              <div className="moccet-ai-mode-indicator">
+                <i className="fa-solid fa-robot"></i>
+                <span>AI Mode Active</span>
+              </div>
+            )}
+            
+            {/* AI Responding Indicator */}
+            {isAIResponding && (
+              <div className="moccet-ai-responding">
+                <div className="moccet-ai-responding-spinner">
+                  <i className="fa-solid fa-spinner fa-spin"></i>
+                </div>
+                <span>Moccet is thinking...</span>
+              </div>
+            )}
+            
+            <div className={`moccet-input-container ${isAIMode ? 'ai-mode' : ''} ${isAIResponding ? 'ai-responding' : ''}`}>
               <textarea 
                 ref={inputRef}
                 className="moccet-input-editor" 
-                placeholder="Type a message or use / for commands..." 
+                placeholder={isAIMode ? "Ask Moccet anything..." : "Type a message or use / for commands..."} 
                 rows="1"
                 value={inputValue}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyPress}
                 onPaste={handlePaste}
+                disabled={isAIResponding}
               />
               <div className="moccet-voice-input-button">
                 <i className="fa-solid fa-microphone"></i>
               </div>
               <button 
-                className={`moccet-send-button ${stagedAttachments.length > 0 ? 'has-attachments' : ''}`}
+                className={`moccet-send-button ${stagedAttachments.length > 0 ? 'has-attachments' : ''} ${isAIMode ? 'ai-mode' : ''}`}
                 onClick={handleSendMessage} 
-                disabled={(!inputValue.trim() && stagedAttachments.length === 0) || !activeChannelId || !activeWorkspaceId}
-                title={stagedAttachments.length > 0 ? `Send with ${stagedAttachments.length} attachment(s)` : 'Send message'}
+                disabled={(!inputValue.trim() && stagedAttachments.length === 0) || !activeChannelId || !activeWorkspaceId || isAIResponding}
+                title={isAIMode ? 'Send to AI' : (stagedAttachments.length > 0 ? `Send with ${stagedAttachments.length} attachment(s)` : 'Send message')}
               >
-                <i className="fa-solid fa-paper-plane"></i>
+                <i className={`fa-solid ${isAIMode ? 'fa-robot' : 'fa-paper-plane'}`}></i>
                 {stagedAttachments.length > 0 && (
                   <span className="moccet-attachment-count">{stagedAttachments.length}</span>
                 )}
               </button>
             </div>
-            <div className="moccet-keyboard-shortcut">Press Enter to send, Shift+Enter for new line</div>
+            <div className="moccet-keyboard-shortcut">
+              {isAIMode ? 'AI Mode: Press Enter to send, Esc to cancel' : 'Press Enter to send, Shift+Enter for new line, Ctrl+Space for AI'}
+            </div>
             
             {/* Emoji Picker */}
             {showEmojiPicker && (
@@ -1283,20 +1510,29 @@ const MoccetChat = () => {
               </div>
             )}
             
-            {/* Smart Commands */}
+            {/* Smart Commands / AI Suggestions */}
             {showSmartCommands && (
               <div className="moccet-smart-commands">
                 <div className="moccet-command-list">
-                  {smartCommandsList.map((cmd, i) => (
-                    <div key={i} className={`moccet-command-item ${i === 0 ? 'moccet-active' : ''}`}>
+                  {commandSuggestions.map((cmd, i) => (
+                    <div 
+                      key={i} 
+                      className={`moccet-command-item ${i === 0 ? 'moccet-active' : ''}`}
+                      onClick={() => {
+                        setInputValue(cmd.command + ' ');
+                        const aiTrigger = aiService.checkAITrigger(cmd.command + ' ');
+                        setIsAIMode(aiTrigger.triggered);
+                        setShowSmartCommands(false);
+                        inputRef.current?.focus();
+                      }}
+                    >
                       <div className="moccet-command-icon">
-                        <i className={`fa-solid ${cmd.icon}`}></i>
+                        <i className={`fa-solid ${cmd.command === '/ai' ? 'fa-robot' : cmd.command === '/summarize' ? 'fa-list' : cmd.command === '/translate' ? 'fa-language' : cmd.command === '/explain' ? 'fa-lightbulb' : cmd.command === '/action-items' ? 'fa-tasks' : 'fa-compress'}`}></i>
                       </div>
                       <div className="moccet-command-details">
-                        <div className="moccet-command-name">{cmd.name}</div>
-                        <div className="moccet-command-description">{cmd.desc}</div>
+                        <div className="moccet-command-name">{cmd.command}</div>
+                        <div className="moccet-command-description">{cmd.description}</div>
                       </div>
-                      <div className="moccet-command-shortcut">{cmd.shortcut}</div>
                     </div>
                   ))}
                 </div>
@@ -1587,6 +1823,22 @@ const MoccetChat = () => {
           </div>
         </div>
       )}
+      
+      {/* AI Analytics Modal */}
+      <AIAnalytics
+        workspaceId={activeWorkspaceId}
+        isOpen={showAIAnalytics}
+        onClose={() => setShowAIAnalytics(false)}
+      />
+      
+      {/* AI Context Menu */}
+      <AIContextMenu
+        isOpen={contextMenu.isOpen}
+        position={contextMenu.position}
+        message={contextMenu.message}
+        onClose={() => setContextMenu({ isOpen: false, position: null, message: null })}
+        onAction={handleAIAction}
+      />
     </div>
   );
 };

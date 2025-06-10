@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+    <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background circle -->
+  <circle cx="50" cy="50" r="48" fill="url(#gradient)" />
+  
+  <!-- Robot icon -->
+  <g fill="white">
+    <!-- Head -->
+    <rect x="35" y="25" width="30" height="25" rx="4" />
+    
+    <!-- Eyes -->
+    <circle cx="42" cy="37" r="3" fill="#667eea" />
+    <circle cx="58" cy="37" r="3" fill="#667eea" />
+    
+    <!-- Antenna -->
+    <rect x="48" y="15" width="4" height="10" rx="2" />
+    <circle cx="50" cy="13" r="3" />
+    
+    <!-- Body -->
+    <rect x="30" y="52" width="40" height="30" rx="4" />
+    
+    <!-- Arms -->
+    <rect x="20" y="58" width="8" height="20" rx="4" />
+    <rect x="72" y="58" width="8" height="20" rx="4" />
+    
+    <!-- Details on body -->
+    <rect x="38" y="60" width="24" height="3" rx="1.5" fill="#667eea" />
+    <rect x="38" y="67" width="16" height="3" rx="1.5" fill="#667eea" />
+    <rect x="38" y="74" width="20" height="3" rx="1.5" fill="#667eea" />
+  </g>
+</svg>
