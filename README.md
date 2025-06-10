@@ -2,6 +2,8 @@
 
 A modern, real-time messaging application built with React and Firebase, featuring channels, direct messages, file uploads, and AI assistant integration.
 
+**NOTE: PLEASE FILL IN FIREBASE PRIVATE KEY AND ANTHROPIC API KEY IN .env.local and api/ai-chat.js before running the app
+
 ## 🚀 Features
 
 - **Real-time Messaging**: Instant message delivery with Firebase Realtime Database
