@@ -1,130 +1,179 @@
-# Moccet Chat - Slack-like Messaging Application
+# Moccet Chat - Slack-like Messaging Application with AI Assistant
 
-A modern, real-time messaging application built with React and Firebase, featuring channels, direct messages, file uploads, and AI assistant integration.
-
-**NOTE: PLEASE FILL IN FIREBASE PRIVATE KEY AND ANTHROPIC API KEY IN .env.local and api/ai-chat.js before running the app
+A modern, real-time messaging application built with React, Firebase, and Anthropic Claude AI, featuring channels, direct messages, file uploads, and an integrated AI assistant.
 
 ## 🚀 Features
 
 - **Real-time Messaging**: Instant message delivery with Firebase Realtime Database
+- **AI Assistant Integration**: Built-in Claude AI assistant for every conversation
+- **Smart Commands**: Use `/ai`, `/summarize`, `/translate`, and more AI-powered commands
 - **Channels**: Create public/private channels for team communication
 - **Direct Messages**: One-on-one conversations with team members
 - **File Uploads**: Share images, documents, and other files up to 100MB
 - **User Presence**: See who's online and typing indicators
-- **Message Reactions**: React to messages with emojis (coming soon)
-- **AI Assistant**: Built-in AI helper for each conversation (coming soon)
-- **Voice & Video Calls**: WebRTC-based communication (coming soon)
 - **Dark Theme**: Toggle between light and dark modes
 - **Responsive Design**: Works on desktop and mobile devices
+- **AI Analytics**: Track AI usage and performance metrics
+- **Context Menu**: Right-click messages for AI actions
 
 ## 📋 Prerequisites
 
 - Node.js (v14 or higher)
 - npm or yarn
 - Firebase account with a project set up
+- Anthropic Claude API key
 - Git
 
 ## 🛠️ Installation
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/yourusername/moccet-chat-demo.git
-   cd moccet-chat-demo
-   ```
+### 1. Clone the repository
+```bash
+git clone https://github.com/yourusername/moccet-chat-demo.git
+cd moccet-chat-demo
+```
 
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
+### 2. Install all dependencies
+```bash
+# Install root dependencies
+npm install
 
-3. **Set up Firebase**
-   - Create a new Firebase project at [Firebase Console](https://console.firebase.google.com)
-   - Enable Authentication (Email/Password and Google Sign-in)
-   - Enable Firestore Database
-   - Enable Realtime Database
-   - Enable Storage
-   - Enable App Check (optional but recommended)
+# Install API dependencies for Vercel functions
+cd api && npm install && cd ..
 
-4. **Configure environment variables**
-   - Copy `.env.example` to `.env.development`
-   - Add your Firebase configuration:
-   ```env
-   REACT_APP_FIREBASE_API_KEY=your_api_key
-   REACT_APP_FIREBASE_AUTH_DOMAIN=your_auth_domain
-   REACT_APP_FIREBASE_PROJECT_ID=your_project_id
-   REACT_APP_FIREBASE_STORAGE_BUCKET=your_storage_bucket
-   REACT_APP_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
-   REACT_APP_FIREBASE_APP_ID=your_app_id
-   REACT_APP_FIREBASE_DATABASE_URL=your_database_url
-   REACT_APP_RECAPTCHA_SITE_KEY=your_recaptcha_key
-   ```
+# Install functions dependencies (if using Firebase functions)
+cd functions && npm install && cd ..
+```
 
-5. **Set up Firebase Security Rules**
-   - Copy the rules from `firestore.rules` to your Firestore Rules
-   - Copy the rules from `database.rules.json` to your Realtime Database Rules
-   - Copy the rules from `storage.rules` to your Storage Rules
+### 3. Set up environment variables
 
-6. **Run the application**
-   ```bash
-   npm start
-   ```
+Create a `.env.local` file in the root directory:
+```env
+# Firebase Configuration
+REACT_APP_FIREBASE_API_KEY=your_api_key
+REACT_APP_FIREBASE_AUTH_DOMAIN=your_auth_domain
+REACT_APP_FIREBASE_PROJECT_ID=your_project_id
+REACT_APP_FIREBASE_STORAGE_BUCKET=your_storage_bucket
+REACT_APP_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
+REACT_APP_FIREBASE_APP_ID=your_app_id
+REACT_APP_FIREBASE_MEASUREMENT_ID=your_measurement_id
 
-   For development with Firebase emulators:
-   ```bash
-   # Terminal 1: Start Firebase emulators
-   npm run emulators
-   
-   # Terminal 2: Start React app
-   npm start
-   ```
+# Firebase Emulator (set to true for local development)
+REACT_APP_USE_FIREBASE_EMULATOR=true
+
+# Environment
+REACT_APP_ENVIRONMENT=development
+
+# Optional: App Check
+REACT_APP_RECAPTCHA_SITE_KEY=your_recaptcha_key
+REACT_APP_APPCHECK_DEBUG_TOKEN=your_debug_token
+
+# API URLs
+REACT_APP_API_URL=http://localhost:5001/your-project-id/us-central1/api
+REACT_APP_VERCEL_API_URL=http://localhost:3001
+
+# AI Integration - Anthropic Claude
+CLAUDE_API_KEY=your_anthropic_api_key
+
+# Firebase Admin SDK (for production deployment)
+FIREBASE_ADMIN_PROJECT_ID=your_project_id
+FIREBASE_ADMIN_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+FIREBASE_ADMIN_CLIENT_EMAIL=firebase-adminsdk-xxxxx@your-project.iam.gserviceaccount.com
+```
+
+### 4. Verify your setup
+```bash
+node verify-setup.js
+```
+
+This will check that all required configurations are in place.
+
+## 🚀 Running the Application
+
+### Option 1: Using the all-in-one script (Recommended)
+```bash
+./run-local.sh
+```
+
+This script will:
+- Start Firebase emulators (Auth, Firestore, Storage)
+- Start Vercel dev server with AI endpoints
+- Open the app at http://localhost:3001
+
+### Option 2: Run services separately
+
+**Terminal 1 - Firebase Emulators:**
+```bash
+firebase emulators:start
+```
+
+**Terminal 2 - Vercel Dev Server:**
+```bash
+vercel dev --listen 3001
+```
+
+### Option 3: Traditional React development
+```bash
+# Without AI features
+npm start
+
+# With Firebase emulators
+npm run emulators  # Terminal 1
+npm start          # Terminal 2
+```
 
 ## 📱 User Guide
 
 ### Getting Started
 
 1. **Sign Up / Login**
-   - Create an account using email/password or sign in with Google
-   - Verify your email address if using email/password authentication
+   - Create an account using email/password
+   - Verify your email address
 
 2. **First Time Setup**
    - You'll be automatically added to a default workspace
    - A general channel will be created for you
 
-### Using the Application
+### AI Assistant Features
 
-#### Navigation
-- **Left Sidebar**: Main navigation with icons for different sections
-  - 💬 Chat (active)
-  - 💼 Projects (coming soon)
-  - 👥 Team (coming soon)
-  - 📅 Calendar (coming soon)
-  - 📊 Analytics (coming soon)
-  - ⚙️ Settings (coming soon)
-- **Channels Sidebar**: Toggle with the hamburger menu icon
-- **Theme Toggle**: Switch between light/dark mode (moon/sun icon)
-- **Profile Menu**: Click your avatar to access profile and logout
+#### Using AI Commands
 
-#### Channels
-1. **Create a Channel**
-   - Click the `+` icon next to "Pinned Spaces"
-   - Enter a channel name (lowercase, no spaces)
-   - Choose between Public or Private
-   - Click "Create Channel"
+1. **Quick AI Access**
+   - Click the "AI Assist" button in the message input toolbar
+   - Or press `Ctrl+Space` to activate AI mode
+   - Or type `/ai` followed by your question
 
-2. **Join a Channel**
-   - Public channels: Click on any channel in the list
-   - Private channels: Need to be invited by an admin
+2. **Available AI Commands**
+   - `/ai [question]` - Ask the AI anything
+   - `/summarize` - Summarize recent channel messages
+   - `/translate [language]` - Translate the last message
+   - `/explain` - Explain complex terms in the conversation
+   - `/action-items` - Extract tasks from the conversation
+   - `/tldr` - Get a quick summary
 
-3. **Channel Features**
-   - See channel members in the header
-   - View typing indicators when others are typing
-   - Send messages with Enter key
+3. **Context Menu AI Actions**
+   - Right-click any message to access AI actions:
+     - Translate message
+     - Summarize message
+     - Explain message
+     - Improve writing
+     - Fix grammar
+     - Extract tasks
+     - Change tone
 
-#### Messaging
+#### AI Features
+
+- **Contextual Awareness**: AI reads the last 10 messages for context
+- **Markdown Support**: AI responses support formatting and code blocks
+- **Token Usage Tracking**: See how many tokens each response uses
+- **Response Caching**: Repeated questions get instant cached responses
+- **Rate Limiting**: Prevents API abuse with smart rate limiting
+
+### Messaging Features
+
 1. **Send a Message**
    - Type in the message input field
    - Press Enter to send (Shift+Enter for new line)
-   - Use `/` to access smart commands (coming soon)
+   - Use `/` to access AI commands
 
 2. **File Attachments**
    - Click the paperclip icon or drag & drop files
@@ -132,91 +181,128 @@ A modern, real-time messaging application built with React and Firebase, featuri
    - Supports images, documents, videos up to 100MB
    - Multiple files can be attached to a single message
 
-3. **Emojis**
-   - Click the emoji button to open emoji picker
-   - Select an emoji to add to your message
+3. **Keyboard Shortcuts**
+   - `Enter` - Send message
+   - `Shift + Enter` - New line in message
+   - `Ctrl + Space` - Activate AI assistant
+   - `Esc` - Cancel AI mode
+   - `/` - Open command suggestions
 
-4. **Message Features**
-   - Hover over messages to see action buttons
-   - Reply in thread (coming soon)
-   - Add reactions (coming soon)
-   - Edit/Delete your own messages (coming soon)
+### Channel Management
 
-#### Direct Messages
-- Click the `+` next to "Direct Messages"
-- Search for users and start a conversation
-- All DM features work the same as channels
+1. **Create a Channel**
+   - Click the `+` icon next to "Pinned Spaces"
+   - Enter a channel name
+   - Choose between Public or Private
+   - Click "Create Channel"
 
-#### AI Assistant (Coming Soon)
-- Each channel will have an AI assistant
-- Use `/ai` command to interact with the assistant
-- Assistant can help with:
-  - Summarizing conversations
-  - Answering questions
-  - Generating content
-  - Task management
+2. **Channel Features**
+   - See channel members in the header
+   - View typing indicators
+   - AI assistant available in every channel
 
-### Keyboard Shortcuts
-- `Enter` - Send message
-- `Shift + Enter` - New line in message
-- `Esc` - Close modals/panels
-- `/` - Open smart commands
+## 🔧 Configuration
 
-### Tips
-- Messages are saved in real-time
-- Your presence status updates automatically
-- Files are securely stored in Firebase Storage
-- All messages are encrypted in transit
+### Firebase Setup
 
-## 🔒 Security Features
+1. **Enable Services**
+   - Authentication (Email/Password)
+   - Firestore Database
+   - Realtime Database
+   - Storage
+   - App Check (optional)
 
-- Firebase Authentication for secure login
-- Role-based access control (Owner, Admin, Moderator, Member)
-- Private channels with invite-only access
-- File upload validation and virus scanning (coming soon)
-- Rate limiting to prevent spam
-- App Check for bot protection
+2. **Security Rules**
+   - Copy `firestore.rules` to Firestore Rules
+   - Copy `database.rules.json` to Realtime Database Rules
+   - Copy `storage.rules` to Storage Rules
+
+### AI Configuration
+
+1. **Get Claude API Key**
+   - Sign up at [Anthropic Console](https://console.anthropic.com)
+   - Create an API key
+   - Add to `.env.local` as `CLAUDE_API_KEY`
+
+2. **Configure AI Settings**
+   - Model: Claude 3 Haiku (fast responses)
+   - Max tokens: 1000 per response
+   - Temperature: 0.7
+   - Context window: Last 10 messages
+
+## 🛠️ Development Scripts
+
+### Core Commands
+- `npm start` - Start React development server
+- `npm run build` - Build for production
+- `npm test` - Run tests
+
+### Development Tools
+- `./run-local.sh` - Start all services for local development
+- `vercel dev --listen 3001` - Run Vercel dev server with AI endpoints
+- `firebase emulators:start` - Start Firebase emulators
+- `node verify-setup.js` - Verify your setup is correct
+
+### Deployment
+- `vercel` - Deploy to Vercel
+- `firebase deploy` - Deploy Firebase rules and functions
 
 ## 🆘 Troubleshooting
 
-### Common Issues
+### AI Issues
 
-1. **Can't see any channels**
+1. **"Invalid authorization token" error**
+   - Ensure `REACT_APP_USE_FIREBASE_EMULATOR=true` in `.env.local`
+   - Check that Firebase emulators are running
+   - Try refreshing the page and logging in again
+
+2. **AI not responding**
+   - Verify `CLAUDE_API_KEY` is set correctly
+   - Check browser console for errors
+   - Ensure you're running `vercel dev` not just `npm start`
+
+3. **Rate limit errors**
+   - AI has rate limiting: 10 requests per minute
+   - Wait for the specified retry time
+   - Consider upgrading your Anthropic plan
+
+### General Issues
+
+1. **Can't see channels**
    - Refresh the page
-   - Check if you're properly logged in
-   - Ensure your workspace has channels
+   - Check Firebase emulator UI at http://localhost:4000
+   - Verify you're logged in
 
-2. **Messages not sending**
-   - Check your internet connection
-   - Verify you have permission to post in the channel
+2. **File upload fails**
+   - Ensure file is under 100MB
+   - Check Firebase Storage emulator is running
+   - Verify storage rules allow uploads
+
+3. **Messages not sending**
+   - Check all emulators are running
+   - Verify active channel is selected
    - Check browser console for errors
 
-3. **File upload fails**
-   - Ensure file is under 100MB
-   - Check supported file types
-   - Verify storage permissions in Firebase
+## 🏗️ Architecture
 
-4. **Google Sign-in not working**
-   - Enable popups for the site
-   - Check Firebase Auth settings
-   - Ensure Google provider is enabled
+### Frontend
+- React 18 with functional components
+- Firebase SDK for real-time features
+- Context API for state management
+- CSS modules for styling
 
-## 🛠️ Available Scripts
+### Backend
+- Vercel Serverless Functions for AI endpoints
+- Firebase Admin SDK for authentication
+- Anthropic SDK for Claude AI integration
+- Rate limiting and caching middleware
 
-### `npm start`
-Runs the app in development mode at [http://localhost:3000](http://localhost:3000)
-
-### `npm test`
-Launches the test runner in interactive watch mode
-
-### `npm run build`
-Builds the app for production to the `build` folder
-
-### `npm run emulators`
-Starts Firebase emulators for local development
-
-### `npm run eject`
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+### AI Integration
+- `/api/ai-chat` - Main AI chat endpoint
+- Smart command processing
+- Context-aware responses
+- Token usage tracking
+- Response caching
 
 ## 🤝 Contributing
 
@@ -224,14 +310,15 @@ Please read `dev_instructions.md` for details on our code structure and developm
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License.
 
 ## 🙏 Acknowledgments
 
 - Built with React and Firebase
+- AI powered by Anthropic Claude
 - Icons from Font Awesome
 - Inspired by Slack's UI/UX
-- Created with Create React App
+- Deployed on Vercel
 
 ## 📞 Support
 

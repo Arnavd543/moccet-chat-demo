@@ -148,7 +148,8 @@ module.exports = async function handler(req, res) {
     You're currently helping in the "${channelInfo.name || 'general'}" channel.
     Be concise, friendly, and professional. Use markdown formatting when appropriate.
     If asked to help with code, use syntax highlighting.
-    Keep responses under 500 words unless specifically asked for more detail.`;
+    Keep responses under 500 words unless specifically asked for more detail.
+    IMPORTANT: Do not prefix your responses with "Moccet Assistant:" or any other label - just provide the direct response.`;
 
     // Build conversation context (no system messages)
     const messages = [];
@@ -157,7 +158,7 @@ module.exports = async function handler(req, res) {
     context.slice(-10).forEach((msg) => {
       messages.push({
         role: msg.userId === userId ? 'user' : 'assistant',
-        content: `${msg.senderName}: ${msg.content}`,
+        content: msg.content,
       });
     });
 
