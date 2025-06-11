@@ -8,6 +8,13 @@ import { usePresence } from './hooks/usePresence';
 import aiService from './services/aiService';
 import AIAnalytics from './components/AIAnalytics';
 import AIContextMenu from './components/AIContextMenu';
+import webRTCService from './services/webrtcService';
+import callService from './services/callService';
+import CallModal from './components/CallModal';
+import IncomingCall from './components/IncomingCall';
+import WorkspaceSelector from './components/WorkspaceSelector';
+import { collection, query, where, onSnapshot, doc } from 'firebase/firestore';
+import { firestore as db } from './config/firebase';
 
 /**
  * MoccetChat - Main chat interface component
@@ -46,12 +53,20 @@ const MoccetChat = () => {
   const [newChannelName, setNewChannelName] = useState('');
   const [newChannelType, setNewChannelType] = useState('public');
   const [stagedAttachments, setStagedAttachments] = useState([]);
+  const [showWorkspaceSelector, setShowWorkspaceSelector] = useState(false);
   
   // ============ AI State Management ============
   const [isAIMode, setIsAIMode] = useState(false);
   const [isAIResponding, setIsAIResponding] = useState(false);
   const [commandSuggestions, setCommandSuggestions] = useState([]);
   const [contextMenu, setContextMenu] = useState({ isOpen: false, position: null, message: null });
+  
+  // ============ Call State Management ============
+  const [activeCall, setActiveCall] = useState(null);
+  const [incomingCall, setIncomingCall] = useState(null);
+  const [isInCall, setIsInCall] = useState(false);
+  const [callParticipants, setCallParticipants] = useState([]);
+  const [activeCallsInChannel, setActiveCallsInChannel] = useState(new Map());
   
   // ============ Message Context & Operations ============
   const messageContext = useMessage();
@@ -92,6 +107,41 @@ const MoccetChat = () => {
 
   // ============ Utility Functions ============
   /**
+   * Fetch participant information from Firestore
+   */
+  const fetchParticipantInfo = async (participantIds) => {
+    try {
+      const participantPromises = participantIds.map(async (uid) => {
+        const userDoc = await firestoreService.getUserProfile(uid);
+        if (userDoc) {
+          return {
+            id: uid,
+            name: userDoc.displayName || userDoc.email?.split('@')[0] || 'User',
+            photoURL: userDoc.photoURL,
+            email: userDoc.email
+          };
+        }
+        return {
+          id: uid,
+          name: 'Unknown User',
+          photoURL: null,
+          email: null
+        };
+      });
+      
+      return await Promise.all(participantPromises);
+    } catch (error) {
+      console.error('Error fetching participant info:', error);
+      return participantIds.map(id => ({
+        id,
+        name: 'Unknown User',
+        photoURL: null,
+        email: null
+      }));
+    }
+  };
+
+  /**
    * Formats a timestamp into a human-readable relative time
    * @param {Date|Timestamp} timestamp - The timestamp to format
    * @returns {string} Formatted time string (e.g., "2m", "3h", "5d")
@@ -122,28 +172,32 @@ const MoccetChat = () => {
         console.log('Initializing workspace for user:', currentUser.uid);
         
         // Get user's workspaces
+        console.log('[MoccetChat] Getting user workspaces for user:', currentUser.uid);
         const userWorkspaces = await firestoreService.getUserWorkspaces(currentUser.uid);
-        console.log('User workspaces:', userWorkspaces);
-        console.log('Number of workspaces:', userWorkspaces.length);
-        console.log('Workspace details:', JSON.stringify(userWorkspaces, null, 2));
+        console.log('[MoccetChat] User workspaces raw response:', userWorkspaces);
+        console.log('[MoccetChat] Number of workspaces:', userWorkspaces.length);
+        console.log('[MoccetChat] Workspace details:', JSON.stringify(userWorkspaces.map(ws => ({
+          id: ws?.id,
+          name: ws?.name,
+          members: ws?.members?.length || 0,
+          hasId: !!ws?.id,
+          hasData: !!ws
+        })), null, 2));
         
         // Filter out invalid workspaces
         const validWorkspaces = userWorkspaces.filter(ws => ws && ws.id);
-        console.log('Valid workspaces:', validWorkspaces.length);
+        console.log('[MoccetChat] Valid workspaces after filtering:', validWorkspaces.map(ws => ({
+          id: ws.id,
+          name: ws.name
+        })));
         setWorkspaces(validWorkspaces);
         
-        // If no workspaces exist, create a default one
+        // If no workspaces exist, show workspace selector
         if (validWorkspaces.length === 0) {
-          console.log('[MoccetChat] No workspaces found, creating default workspace...');
-          const newWorkspace = await firestoreService.createWorkspace({
-            name: 'My Workspace',
-            description: 'Default workspace',
-            ownerId: currentUser.uid,
-            members: [currentUser.uid],
-            admins: [currentUser.uid]
-          });
-          validWorkspaces.push(newWorkspace);
-          setWorkspaces([newWorkspace]);
+          console.log('[MoccetChat] No workspaces found, showing workspace selector...');
+          setShowWorkspaceSelector(true);
+          setIsInitializing(false);
+          return;
         }
         
         if (validWorkspaces.length > 0) {
@@ -183,29 +237,89 @@ const MoccetChat = () => {
     initializeWorkspace();
   }, [currentUser]);
   
-  // Load channels when workspace changes
+  // Subscribe to channels in real-time when workspace changes
   useEffect(() => {
-    const loadChannels = async () => {
-      if (!activeWorkspaceId || !currentUser) return;
-      
-      try {
-        console.log('Loading channels for workspace:', activeWorkspaceId);
-        const workspaceChannels = await firestoreService.getChannels(activeWorkspaceId, currentUser.uid);
-        console.log('Loaded channels:', workspaceChannels);
-        setChannels(workspaceChannels);
+    if (!activeWorkspaceId || !currentUser) return;
+    
+    console.log('Setting up real-time channel subscription for workspace:', activeWorkspaceId);
+    
+    // Subscribe to channels collection for real-time updates
+    const q = query(
+      collection(db, 'channels'),
+      where('workspaceId', '==', activeWorkspaceId)
+    );
+    
+    const unsubscribe = onSnapshot(q, 
+      (snapshot) => {
+        const allChannels = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        
+        // Filter channels based on visibility rules
+        const visibleChannels = allChannels.filter(channel => {
+          // Show all public channels
+          if (channel.type === 'public') return true;
+          // Show private channels only if user is a member
+          if (channel.type === 'private' && channel.members?.includes(currentUser.uid)) return true;
+          return false;
+        });
+        
+        console.log('[MoccetChat] Real-time channels update:', visibleChannels.map(c => ({ id: c.id, name: c.name })));
+        setChannels(visibleChannels);
         
         // If no active channel but channels exist, select the first one
-        if (!activeChannelId && workspaceChannels.length > 0) {
-          const firstChannel = workspaceChannels[0];
+        if (!activeChannelId && visibleChannels.length > 0) {
+          const firstChannel = visibleChannels[0];
+          console.log('[MoccetChat] Auto-selecting first channel:', firstChannel.name);
           setActiveChannelId(firstChannel.id);
         }
-      } catch (error) {
-        console.error('Error loading channels:', error);
+      },
+      (error) => {
+        console.error('Error in channel subscription:', error);
       }
-    };
+    );
     
-    loadChannels();
-  }, [activeWorkspaceId, currentUser, activeChannelId]);
+    return () => unsubscribe();
+  }, [activeWorkspaceId, currentUser]); // Removed activeChannelId from dependencies
+  
+  // Subscribe to workspace updates for real-time member count
+  useEffect(() => {
+    if (!activeWorkspaceId) return;
+    
+    console.log('Setting up real-time workspace subscription:', activeWorkspaceId);
+    
+    const workspaceRef = doc(db, 'workspaces', activeWorkspaceId);
+    const unsubscribe = onSnapshot(workspaceRef,
+      (doc) => {
+        if (doc.exists()) {
+          const workspaceData = { id: doc.id, ...doc.data() };
+          console.log('[MoccetChat] Workspace updated:', {
+            id: workspaceData.id,
+            name: workspaceData.name,
+            memberCount: workspaceData.members?.length || 0
+          });
+          
+          // Update the workspace in the workspaces array
+          setWorkspaces(prev => {
+            const updated = [...prev];
+            const index = updated.findIndex(w => w.id === activeWorkspaceId);
+            if (index >= 0) {
+              updated[index] = workspaceData;
+            } else {
+              updated.push(workspaceData);
+            }
+            return updated;
+          });
+        }
+      },
+      (error) => {
+        console.error('Error in workspace subscription:', error);
+      }
+    );
+    
+    return () => unsubscribe();
+  }, [activeWorkspaceId]);
   
   // Subscribe to messages when channel changes
   useEffect(() => {
@@ -273,6 +387,84 @@ const MoccetChat = () => {
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
   }, [showProfileMenu]);
+
+  // Listen for incoming calls and track active calls
+  useEffect(() => {
+    if (!activeChannelId || !currentUser) return;
+
+    const checkForCalls = async () => {
+      try {
+        // Query for all active calls in this channel
+        const callsRef = collection(db, 'calls');
+        const q = query(
+          callsRef,
+          where('channelId', '==', activeChannelId),
+          where('state', 'in', ['initiating', 'ringing', 'active', 'ended'])
+        );
+        
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+          const updatedCalls = new Map();
+          
+          snapshot.forEach((doc) => {
+            const callData = { id: doc.id, ...doc.data() };
+            updatedCalls.set(doc.id, callData);
+            
+            // Check for incoming calls - only show popup for ringing calls we didn't initiate
+            if (callData.state === 'ringing' &&
+                callData.initiatorId !== currentUser.uid && 
+                !isInCall && 
+                !activeCall &&
+                !callData.participants.includes(currentUser.uid) &&
+                (!incomingCall || incomingCall.id !== callData.id)) {
+              // Fetch caller info
+              firestoreService.getUserProfile(callData.initiatorId).then(callerProfile => {
+                setIncomingCall({
+                  ...callData,
+                  caller: {
+                    id: callData.initiatorId,
+                    name: callerProfile?.displayName || callerProfile?.email?.split('@')[0] || 'Channel Member',
+                    photoURL: callerProfile?.photoURL || null
+                  }
+                });
+              });
+            }
+          });
+          
+          // Update active calls map
+          setActiveCallsInChannel(updatedCalls);
+          
+          // Clear incoming call if it's no longer active, if user joined, or if call ended
+          if (incomingCall && (!updatedCalls.has(incomingCall.id) || 
+              updatedCalls.get(incomingCall.id)?.participants?.includes(currentUser.uid) ||
+              updatedCalls.get(incomingCall.id)?.state === 'ended')) {
+            setIncomingCall(null);
+          }
+        });
+        
+        return () => unsubscribe();
+      } catch (error) {
+        console.error('Error checking for calls:', error);
+      }
+    };
+
+    checkForCalls();
+  }, [activeChannelId, currentUser, isInCall, activeCall]);
+
+  // Listen for participant updates from WebRTC service
+  useEffect(() => {
+    if (!isInCall || !activeCall) return;
+
+    const handleParticipantsUpdate = async (participantIds) => {
+      const participantInfo = await fetchParticipantInfo(participantIds);
+      setCallParticipants(participantInfo);
+    };
+
+    webRTCService.on('participantsUpdated', handleParticipantsUpdate);
+
+    return () => {
+      webRTCService.off('participantsUpdated', handleParticipantsUpdate);
+    };
+  }, [isInCall, activeCall]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -768,9 +960,135 @@ const MoccetChat = () => {
     }
   };
 
+  // ============ Call Handlers ============
+
+  const startCall = async (isVideo = true) => {
+    if (!activeChannelId || isInCall) return;
+    
+    try {
+      // Get channel members
+      const channel = channels.find(c => c.id === activeChannelId);
+      if (!channel) return;
+      
+      // Get all channel members except current user
+      const otherMembers = (channel.members || [])
+        .filter(memberId => memberId !== currentUser.uid)
+        .slice(0, 3); // Limit to 4 participants total
+      
+      if (otherMembers.length === 0) {
+        alert('No other members in this channel to call');
+        return;
+      }
+      
+      // Include current user and other members
+      const participants = [currentUser.uid, ...otherMembers];
+      
+      const call = await webRTCService.startCall(activeChannelId, participants, isVideo);
+      setActiveCall(call);
+      setIsInCall(true);
+      
+      // Fetch participant info from Firestore
+      const participantInfo = await fetchParticipantInfo([currentUser.uid]);
+      setCallParticipants(participantInfo);
+      
+      // Send a message notifying about the call
+      console.log('[MoccetChat] Sending call notification message:', {
+        channelId: activeChannelId,
+        workspaceId: activeWorkspaceId,
+        callId: call.id,
+        callType: isVideo ? 'video' : 'voice'
+      });
+      
+      await sendMessage(
+        activeChannelId,
+        `Started a ${isVideo ? 'video' : 'voice'} call. Click join to participate!`,
+        activeWorkspaceId,
+        {
+          isSystemMessage: true,
+          callId: call.id,
+          callType: isVideo ? 'video' : 'voice'
+        }
+      );
+    } catch (error) {
+      console.error('Error starting call:', error);
+      alert('Failed to start call: ' + error.message);
+    }
+  };
+
+  // Handle incoming calls (kept for potential future use)
+  // eslint-disable-next-line no-unused-vars
+  const handleIncomingCall = (callData) => {
+    if (!isInCall) {
+      setIncomingCall(callData);
+    }
+  };
+
+  const acceptCall = async () => {
+    if (!incomingCall) return;
+    
+    try {
+      const call = await webRTCService.joinCall(incomingCall.id, currentUser.uid);
+      setActiveCall(call);
+      setIsInCall(true);
+      setIncomingCall(null);
+      
+      // Fetch participant info from Firestore
+      const participantInfo = await fetchParticipantInfo(call.participants);
+      setCallParticipants(participantInfo);
+    } catch (error) {
+      console.error('Error accepting call:', error);
+      alert('Failed to join call: ' + error.message);
+    }
+  };
+
+  const declineCall = () => {
+    setIncomingCall(null);
+  };
+
+  const endCall = async () => {
+    try {
+      await webRTCService.endCall();
+    } catch (error) {
+      console.error('Error ending call:', error);
+    } finally {
+      // Always clean up local state
+      setActiveCall(null);
+      setIsInCall(false);
+      setCallParticipants([]);
+      setIncomingCall(null);
+    }
+  };
+
+  // ============ Workspace Selection Handler ============
+  const handleWorkspaceSelected = async (workspace) => {
+    console.log('[MoccetChat] Workspace selected:', workspace);
+    setShowWorkspaceSelector(false);
+    setActiveWorkspaceId(workspace.id);
+    setWorkspaces([workspace]);
+    
+    // Load channels for the newly selected workspace
+    try {
+      const workspaceChannels = await firestoreService.getChannels(workspace.id, currentUser.uid);
+      console.log('[MoccetChat] Loaded channels for new workspace:', workspaceChannels);
+      setChannels(workspaceChannels);
+      
+      // Set the first channel as active
+      if (workspaceChannels.length > 0) {
+        const firstChannel = workspaceChannels[0];
+        setActiveChannelId(firstChannel.id);
+      }
+      
+      // Get direct messages
+      const dms = await firestoreService.getDirectMessages(currentUser.uid);
+      setDirectMessages(dms);
+    } catch (error) {
+      console.error('[MoccetChat] Error loading workspace data:', error);
+    }
+  };
+
 
   // Show loading screen during initialization
-  if (isInitializing && !activeWorkspaceId) {
+  if (isInitializing && !activeWorkspaceId && !showWorkspaceSelector) {
     return (
       <div className={`moccet-app-container ${isDarkTheme ? 'moccet-dark-theme' : ''}`}>
         <div style={{
@@ -790,6 +1108,11 @@ const MoccetChat = () => {
         </div>
       </div>
     );
+  }
+
+  // Show workspace selector if needed
+  if (showWorkspaceSelector || (!activeWorkspaceId && !isInitializing)) {
+    return <WorkspaceSelector onWorkspaceSelected={handleWorkspaceSelected} />;
   }
 
   return (
@@ -1025,6 +1348,23 @@ const MoccetChat = () => {
             </div>
           </div>
           <div className="moccet-header-actions">
+            {/* Call buttons */}
+            <div 
+              className={`moccet-header-button ${isInCall ? 'active' : ''}`}
+              onClick={() => !isInCall && startCall(false)}
+              style={{ opacity: isInCall ? 0.5 : 1, cursor: isInCall ? 'not-allowed' : 'pointer' }}
+            >
+              <i className="fa-solid fa-phone"></i>
+              <div className="moccet-tooltip">{isInCall ? 'In Call' : 'Start Voice Call'}</div>
+            </div>
+            <div 
+              className={`moccet-header-button ${isInCall ? 'active' : ''}`}
+              onClick={() => !isInCall && startCall(true)}
+              style={{ opacity: isInCall ? 0.5 : 1, cursor: isInCall ? 'not-allowed' : 'pointer' }}
+            >
+              <i className="fa-solid fa-video"></i>
+              <div className="moccet-tooltip">{isInCall ? 'In Call' : 'Start Video Call'}</div>
+            </div>
             <div className="moccet-header-button" onClick={() => setShowAgentDirectory(true)}>
               <i className="fa-solid fa-robot"></i>
               <div className="moccet-tooltip">Agent Directory</div>
@@ -1093,6 +1433,28 @@ const MoccetChat = () => {
                       minute: '2-digit',
                       hour12: true 
                     }) : 'Just now';
+                  
+                  // Debug logging for system messages
+                  if (message.isSystemMessage) {
+                    console.log('[MoccetChat] System message detected:', {
+                      messageId: message.id,
+                      content: message.content,
+                      isSystemMessage: message.isSystemMessage,
+                      callId: message.callId,
+                      callType: message.callType,
+                      isInCall,
+                      activeCallsSize: activeCallsInChannel.size,
+                      activeCallIds: Array.from(activeCallsInChannel.keys()),
+                      hasCallId: activeCallsInChannel.has(message.callId),
+                      conditions: {
+                        hasSystemMessage: !!message.isSystemMessage,
+                        hasCallId: !!message.callId,
+                        notInCall: !isInCall,
+                        callIsActive: activeCallsInChannel.has(message.callId),
+                        allConditionsMet: message.isSystemMessage && message.callId && !isInCall && activeCallsInChannel.has(message.callId)
+                      }
+                    });
+                  }
                   
                   // Determine message classes
                   const messageClasses = [
@@ -1184,6 +1546,64 @@ const MoccetChat = () => {
                           }}>
                             {message.content}
                           </div>
+                          
+                          {/* Call info for system messages */}
+                          {message.isSystemMessage && message.callId && (
+                            <div style={{ marginTop: '12px' }}>
+                              {!isInCall && activeCallsInChannel.has(message.callId) ? (
+                                <button
+                                  onClick={async () => {
+                                    try {
+                                      const call = await webRTCService.joinCall(message.callId, currentUser.uid);
+                                      setActiveCall(call);
+                                      setIsInCall(true);
+                                      const participantInfo = await fetchParticipantInfo(call.participants);
+                                      setCallParticipants(participantInfo);
+                                    } catch (error) {
+                                      console.error('Error joining call:', error);
+                                      alert('Failed to join call: ' + error.message);
+                                    }
+                                  }}
+                                  style={{
+                                    padding: '8px 16px',
+                                    background: message.callType === 'video' ? '#7c3aed' : '#10b981',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    fontSize: '14px',
+                                    fontWeight: '500',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '8px'
+                                  }}
+                                >
+                                  <i className={`fa-solid ${message.callType === 'video' ? 'fa-video' : 'fa-phone'}`}></i>
+                                  Join {message.callType === 'video' ? 'Video' : 'Voice'} Call
+                                </button>
+                              ) : (
+                                <div style={{
+                                  padding: '8px 16px',
+                                  background: 'rgba(0, 0, 0, 0.1)',
+                                  borderRadius: '6px',
+                                  fontSize: '14px',
+                                  color: '#666',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '8px'
+                                }}>
+                                  <i className={`fa-solid ${message.callType === 'video' ? 'fa-video' : 'fa-phone'}`}></i>
+                                  {(() => {
+                                    const callData = activeCallsInChannel.get(message.callId);
+                                    if (callData?.state === 'ended' && callData?.duration) {
+                                      return `${message.callType === 'video' ? 'Video' : 'Voice'} call ended • ${Math.floor(callData.duration / 60)}:${(callData.duration % 60).toString().padStart(2, '0')}`;
+                                    }
+                                    return `${message.callType === 'video' ? 'Video' : 'Voice'} call ended`;
+                                  })()}
+                                </div>
+                              )}
+                            </div>
+                          )}
                           
                           {/* Display AI usage info if available */}
                           {isAI && message.aiUsage && (
@@ -1838,6 +2258,24 @@ const MoccetChat = () => {
         message={contextMenu.message}
         onClose={() => setContextMenu({ isOpen: false, position: null, message: null })}
         onAction={handleAIAction}
+      />
+      
+      {/* Call Modal */}
+      <CallModal
+        isOpen={isInCall && activeCall}
+        onClose={endCall}
+        call={activeCall}
+        currentUser={currentUser}
+        participants={callParticipants}
+      />
+      
+      {/* Incoming Call */}
+      <IncomingCall
+        isOpen={!!incomingCall}
+        caller={incomingCall?.caller}
+        callType={incomingCall?.isVideo ? 'video' : 'voice'}
+        onAccept={acceptCall}
+        onDecline={declineCall}
       />
     </div>
   );

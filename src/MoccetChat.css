@@ -1116,6 +1116,11 @@
   transform: translateY(-2px);
 }
 
+.moccet-header-button.active {
+  background-color: var(--moccet-color-primary-light);
+  color: var(--moccet-color-primary);
+}
+
 .moccet-header-button .moccet-tooltip {
   position: absolute;
   top: 100%;

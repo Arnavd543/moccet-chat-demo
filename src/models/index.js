@@ -93,6 +93,11 @@ export const createMessage = (data) => ({
   isAIGenerated: data.isAIGenerated || false,
   aiContext: data.aiContext || null,
   
+  // System message fields
+  isSystemMessage: data.isSystemMessage || false,
+  callId: data.callId || null,
+  callType: data.callType || null,
+  
   // Delivery status
   status: 'sending', // sending, sent, delivered, read
   deliveredTo: [],

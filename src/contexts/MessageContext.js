@@ -75,7 +75,10 @@ export const MessageProvider = ({ children }) => {
           isAI: metadata.isAI || false,
           aiUsage: metadata.usage,
           cached: metadata.cached,
-          isError: metadata.isError
+          isError: metadata.isError,
+          isSystemMessage: metadata.isSystemMessage || false,
+          callId: metadata.callId || null,
+          callType: metadata.callType || null
         },
         {
           uid: userId,

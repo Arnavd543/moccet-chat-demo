@@ -4,9 +4,11 @@ A modern, real-time messaging application built with React, Firebase, and Anthro
 
 ## 🚀 Features
 
+- **Workspace Management**: Create or join workspaces using shareable workspace IDs
 - **Real-time Messaging**: Instant message delivery with Firebase Realtime Database
 - **AI Assistant Integration**: Built-in Claude AI assistant for every conversation
 - **Smart Commands**: Use `/ai`, `/summarize`, `/translate`, and more AI-powered commands
+- **Voice/Video Calls**: WebRTC-powered calls with screen sharing
 - **Channels**: Create public/private channels for team communication
 - **Direct Messages**: One-on-one conversations with team members
 - **File Uploads**: Share images, documents, and other files up to 100MB
@@ -200,6 +202,18 @@ npm start          # Terminal 2
    - See channel members in the header
    - View typing indicators
    - AI assistant available in every channel
+
+3. **Workspace Management**
+   - Create a new workspace or join existing one
+   - Share workspace ID with team members
+   - Multiple users can collaborate in the same workspace
+   - See [WORKSPACE_TESTING.md](./WORKSPACE_TESTING.md) for detailed testing guide
+
+4. **Voice/Video Calls**
+   - Click phone/video icons in channel header
+   - WebRTC-based peer-to-peer connections
+   - Screen sharing support (desktop only)
+   - See [test-calls.md](./test-calls.md) for testing guide
 
 ## 🔧 Configuration
 

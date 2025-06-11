@@ -181,28 +181,32 @@ class FirestoreService {
     try {
       console.log('[FirestoreService] Getting channels for workspace:', workspaceId, 'user:', userId);
       
-      let q;
-      if (userId) {
-        q = query(
-          collection(firestore, 'channels'),
-          where('workspaceId', '==', workspaceId),
-          where('members', 'array-contains', userId)
-        );
-      } else {
-        // If no userId, get all public channels
-        q = query(
-          collection(firestore, 'channels'),
-          where('workspaceId', '==', workspaceId)
-        );
-      }
+      // Get all channels for the workspace
+      // Users should see all public channels, plus private channels they're members of
+      const q = query(
+        collection(firestore, 'channels'),
+        where('workspaceId', '==', workspaceId)
+      );
       
       const snapshot = await getDocs(q);
-      const channels = snapshot.docs.map(doc => ({
+      let channels = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
       
-      console.log('[FirestoreService] Found channels:', channels.map(c => ({ id: c.id, name: c.name })));
+      // Filter channels based on visibility rules
+      if (userId) {
+        channels = channels.filter(channel => {
+          // Show all public channels
+          if (channel.type === 'public') return true;
+          // Show private channels only if user is a member
+          if (channel.type === 'private' && channel.members?.includes(userId)) return true;
+          // Hide all other channels
+          return false;
+        });
+      }
+      
+      console.log('[FirestoreService] Found channels:', channels.map(c => ({ id: c.id, name: c.name, type: c.type })));
       return channels;
     } catch (error) {
       console.error('Error getting channels:', error);
@@ -269,6 +273,9 @@ class FirestoreService {
         hasSenderId: !!message.senderId,
         userId: message.userId,
         senderId: message.senderId,
+        isSystemMessage: message.isSystemMessage,
+        callId: message.callId,
+        callType: message.callType,
         fullMessage: message
       });
       
@@ -550,6 +557,12 @@ class FirestoreService {
   // Get user's workspaces
   async getUserWorkspaces(userId = null) {
     try {
+      console.log('[FirestoreService] getUserWorkspaces called:', {
+        userId,
+        hasUserId: !!userId,
+        timestamp: new Date().toISOString()
+      });
+      
       // If no userId provided, get all workspaces (for development)
       const q = userId ? 
         query(
@@ -560,18 +573,43 @@ class FirestoreService {
           collection(firestore, 'workspaces')
         );
       
+      console.log('[FirestoreService] Executing workspaces query...');
       const snapshot = await getDocs(q);
-      const workspaces = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+      console.log('[FirestoreService] Query results:', {
+        docsFound: snapshot.docs.length,
+        empty: snapshot.empty
+      });
+      
+      const workspaces = snapshot.docs.map(doc => {
+        const data = doc.data();
+        console.log('[FirestoreService] Workspace data:', {
+          id: doc.id,
+          name: data.name,
+          members: data.members?.length || 0,
+          userIsMember: data.members?.includes(userId)
+        });
+        return {
+          id: doc.id,
+          ...data
+        };
+      });
 
       // Filter out archived workspaces
       const activeWorkspaces = workspaces.filter(ws => !ws.isArchived);
+      console.log('[FirestoreService] Active workspaces after filtering:', {
+        totalWorkspaces: workspaces.length,
+        activeWorkspaces: activeWorkspaces.length,
+        workspaceIds: activeWorkspaces.map(ws => ws.id)
+      });
 
       return activeWorkspaces;
     } catch (error) {
-      console.error('Error getting user workspaces:', error);
+      console.error('[FirestoreService] Error getting user workspaces:', {
+        error: error.message,
+        code: error.code,
+        userId,
+        stack: error.stack
+      });
       throw error;
     }
   }
@@ -594,6 +632,250 @@ class FirestoreService {
     } catch (error) {
       console.error('Error getting direct messages:', error);
       return []; // Return empty array on error
+    }
+  }
+
+  /**
+   * Get a specific workspace by ID
+   * @param {string} workspaceId - The workspace ID to retrieve
+   * @returns {Promise<Object|null>} The workspace object or null if not found
+   */
+  async getWorkspace(workspaceId) {
+    try {
+      console.log('[FirestoreService] Getting workspace:', {
+        workspaceId,
+        idLength: workspaceId?.length,
+        idType: typeof workspaceId
+      });
+      
+      // Validate workspace ID
+      if (!workspaceId || typeof workspaceId !== 'string' || workspaceId.trim() === '') {
+        console.error('[FirestoreService] Invalid workspace ID:', workspaceId);
+        return null;
+      }
+      
+      const workspaceRef = doc(firestore, 'workspaces', workspaceId);
+      console.log('[FirestoreService] Fetching workspace document...');
+      const workspaceDoc = await getDoc(workspaceRef);
+      
+      if (!workspaceDoc.exists()) {
+        console.log('[FirestoreService] Workspace not found:', {
+          workspaceId,
+          docExists: workspaceDoc.exists(),
+          docRef: workspaceRef.path
+        });
+        return null;
+      }
+      
+      const workspace = {
+        id: workspaceDoc.id,
+        ...workspaceDoc.data()
+      };
+      
+      console.log('[FirestoreService] Found workspace:', {
+        id: workspace.id,
+        name: workspace.name,
+        members: workspace.members?.length || 0,
+        admins: workspace.admins?.length || 0
+      });
+      return workspace;
+    } catch (error) {
+      console.error('[FirestoreService] Error getting workspace:', {
+        error: error.message,
+        code: error.code,
+        workspaceId,
+        stack: error.stack
+      });
+      throw error; // Re-throw to let caller handle it
+    }
+  }
+
+  /**
+   * Add a user to a workspace
+   * @param {string} workspaceId - The workspace ID to join
+   * @param {string} userId - The user ID to add
+   * @returns {Promise<void>}
+   */
+  async joinWorkspace(workspaceId, userId) {
+    try {
+      console.log('[FirestoreService] Adding user to workspace:', { 
+        workspaceId, 
+        userId,
+        timestamp: new Date().toISOString()
+      });
+      
+      // First verify the workspace exists
+      console.log('[FirestoreService] Verifying workspace exists...');
+      const workspace = await this.getWorkspace(workspaceId);
+      if (!workspace) {
+        const error = new Error('Workspace not found');
+        error.code = 'not-found';
+        throw error;
+      }
+      
+      console.log('[FirestoreService] Workspace verified, current members:', workspace.members);
+      
+      // Check if user is already a member
+      if (workspace.members && workspace.members.includes(userId)) {
+        console.log('[FirestoreService] User is already a member of this workspace');
+        return; // User is already a member, no need to add again
+      }
+      
+      // Update workspace members array
+      const workspaceRef = doc(firestore, 'workspaces', workspaceId);
+      console.log('[FirestoreService] Updating workspace members array...');
+      await updateDoc(workspaceRef, {
+        members: arrayUnion(userId),
+        updatedAt: serverTimestamp()
+      });
+      console.log('[FirestoreService] Workspace members array updated');
+      
+      // Add member document to workspace members subcollection
+      const memberRef = doc(firestore, 'workspaces', workspaceId, 'members', userId);
+      console.log('[FirestoreService] Creating member document...');
+      await setDoc(memberRef, {
+        userId: userId,
+        role: 'member', // Default role for new members
+        joinedAt: serverTimestamp(),
+        lastActiveAt: serverTimestamp()
+      });
+      console.log('[FirestoreService] Member document created');
+      
+      // Automatically add user to all public channels in the workspace
+      console.log('[FirestoreService] Adding user to public channels...');
+      const channels = await this.getChannels(workspaceId);
+      const publicChannels = channels.filter(c => c.type === 'public');
+      
+      for (const channel of publicChannels) {
+        console.log('[FirestoreService] Adding user to channel:', channel.name);
+        await this.joinChannel(channel.id, userId);
+      }
+      
+      console.log('[FirestoreService] User added to workspace successfully');
+    } catch (error) {
+      console.error('[FirestoreService] Error joining workspace:', {
+        error: error.message,
+        code: error.code,
+        workspaceId,
+        userId,
+        stack: error.stack
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Add a user to a channel
+   * @param {string} channelId - The channel ID to join
+   * @param {string} userId - The user ID to add
+   * @returns {Promise<void>}
+   */
+  async joinChannel(channelId, userId) {
+    try {
+      console.log('[FirestoreService] Adding user to channel:', { 
+        channelId, 
+        userId,
+        timestamp: new Date().toISOString()
+      });
+      
+      // Verify the channel exists
+      const channelRef = doc(firestore, 'channels', channelId);
+      console.log('[FirestoreService] Fetching channel document...');
+      const channelDoc = await getDoc(channelRef);
+      
+      if (!channelDoc.exists()) {
+        console.error('[FirestoreService] Channel not found:', channelId);
+        const error = new Error('Channel not found');
+        error.code = 'not-found';
+        throw error;
+      }
+      
+      const channelData = channelDoc.data();
+      console.log('[FirestoreService] Channel found:', {
+        id: channelDoc.id,
+        name: channelData.name,
+        currentMembers: channelData.members?.length || 0
+      });
+      
+      // Check if user is already a member
+      if (channelData.members && channelData.members.includes(userId)) {
+        console.log('[FirestoreService] User is already a member of this channel');
+        return; // User is already a member
+      }
+      
+      // Update channel members array
+      console.log('[FirestoreService] Updating channel members array...');
+      await updateDoc(channelRef, {
+        members: arrayUnion(userId),
+        updatedAt: serverTimestamp()
+      });
+      
+      console.log('[FirestoreService] User added to channel successfully');
+    } catch (error) {
+      console.error('[FirestoreService] Error joining channel:', {
+        error: error.message,
+        code: error.code,
+        channelId,
+        userId,
+        stack: error.stack
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Get user profile from Firestore
+   * @param {string} userId - The user ID
+   * @returns {Promise<Object|null>} User profile data or null if not found
+   */
+  async getUserProfile(userId) {
+    try {
+      if (!userId) {
+        console.error('[FirestoreService.getUserProfile] No userId provided');
+        return null;
+      }
+
+      const userRef = doc(firestore, 'users', userId);
+      const userDoc = await getDoc(userRef);
+      
+      if (userDoc.exists()) {
+        return userDoc.data();
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('[FirestoreService.getUserProfile] Error:', {
+        error: error.message,
+        userId,
+        stack: error.stack
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Get user profile by ID
+   * @param {string} userId - The user ID
+   * @returns {Promise<Object|null>} User profile data
+   */
+  async getUserProfile(userId) {
+    try {
+      console.log('[FirestoreService] Getting user profile:', userId);
+      
+      // First try to get from users collection
+      const userRef = doc(firestore, 'users', userId);
+      const userDoc = await getDoc(userRef);
+      
+      if (userDoc.exists()) {
+        return { id: userId, ...userDoc.data() };
+      }
+      
+      // If not found, return minimal data
+      console.log('[FirestoreService] User profile not found in users collection');
+      return null;
+    } catch (error) {
+      console.error('[FirestoreService] Error getting user profile:', error);
+      return null;
     }
   }
 }

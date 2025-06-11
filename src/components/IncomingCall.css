@@ -1,0 +1,215 @@
+.moccet-incoming-call {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2100;
+  animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translate(-50%, -60%);
+    opacity: 0;
+  }
+  to {
+    transform: translate(-50%, -50%);
+    opacity: 1;
+  }
+}
+
+.moccet-incoming-call-content {
+  background: #242424;
+  border-radius: 16px;
+  padding: 32px;
+  width: 400px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+  border: 1px solid #333;
+}
+
+.moccet-incoming-call-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 32px;
+  position: relative;
+}
+
+.call-type-icon {
+  width: 40px;
+  height: 40px;
+  background: #7c3aed;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 18px;
+}
+
+.moccet-incoming-call-header h3 {
+  margin: 0;
+  color: white;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.call-timer {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #666;
+  font-size: 14px;
+}
+
+.moccet-incoming-call-caller {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.caller-avatar {
+  width: 120px;
+  height: 120px;
+  margin: 0 auto 16px;
+  position: relative;
+}
+
+.caller-avatar img,
+.caller-avatar > i {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #333;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 48px;
+  color: #666;
+  position: relative;
+  z-index: 1;
+}
+
+.pulse-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 120px;
+  height: 120px;
+  border: 2px solid #7c3aed;
+  border-radius: 50%;
+  animation: pulse-ring 2s infinite;
+}
+
+.pulse-ring.delay-1 {
+  animation-delay: 0.5s;
+}
+
+.pulse-ring.delay-2 {
+  animation-delay: 1s;
+}
+
+@keyframes pulse-ring {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1.5);
+    opacity: 0;
+  }
+}
+
+.moccet-incoming-call-caller h2 {
+  margin: 0 0 4px 0;
+  color: white;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.moccet-incoming-call-caller p {
+  margin: 0;
+  color: #999;
+  font-size: 14px;
+}
+
+.moccet-incoming-call-actions {
+  display: flex;
+  gap: 24px;
+  justify-content: center;
+}
+
+.call-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+  padding: 12px;
+  border-radius: 8px;
+}
+
+.call-action:hover {
+  transform: scale(1.05);
+}
+
+.call-action i {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  color: white;
+}
+
+.call-action.decline i {
+  background: #ef4444;
+}
+
+.call-action.decline:hover i {
+  background: #dc2626;
+}
+
+.call-action.accept i {
+  background: #22c55e;
+}
+
+.call-action.accept:hover i {
+  background: #16a34a;
+}
+
+.call-action span {
+  color: #999;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* Mobile */
+@media (max-width: 480px) {
+  .moccet-incoming-call-content {
+    width: calc(100vw - 32px);
+    padding: 24px;
+  }
+
+  .caller-avatar,
+  .caller-avatar img,
+  .caller-avatar > i,
+  .pulse-ring {
+    width: 100px;
+    height: 100px;
+  }
+
+  .call-action i {
+    width: 56px;
+    height: 56px;
+    font-size: 20px;
+  }
+}
