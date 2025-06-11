@@ -3709,3 +3709,136 @@ label,
   background: #374151;
 }
 
+/* Members Button and List */
+.moccet-members-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 14px;
+  color: #4b5563;
+  margin-right: 12px;
+}
+
+.moccet-members-button:hover {
+  background: #e5e7eb;
+  color: #1f2937;
+}
+
+.moccet-dark-theme .moccet-members-button {
+  background: #374151;
+  border-color: #4b5563;
+  color: #d1d5db;
+}
+
+.moccet-dark-theme .moccet-members-button:hover {
+  background: #4b5563;
+  color: #f3f4f6;
+}
+
+.moccet-members-count {
+  background: #6366f1;
+  color: white;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 500;
+  min-width: 20px;
+  text-align: center;
+}
+
+/* Members List Modal */
+.moccet-members-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.moccet-member-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  transition: background 0.2s;
+}
+
+.moccet-member-item:hover {
+  background: #f9fafb;
+}
+
+.moccet-dark-theme .moccet-member-item:hover {
+  background: #374151;
+}
+
+.moccet-member-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.moccet-member-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.moccet-member-default-avatar {
+  width: 100%;
+  height: 100%;
+  background: #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7280;
+  font-size: 18px;
+}
+
+.moccet-dark-theme .moccet-member-default-avatar {
+  background: #374151;
+  color: #9ca3af;
+}
+
+.moccet-member-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.moccet-member-name {
+  font-weight: 500;
+  color: #1f2937;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.moccet-dark-theme .moccet-member-name {
+  color: #f3f4f6;
+}
+
+.moccet-member-email {
+  font-size: 13px;
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.moccet-member-badge {
+  background: #10b981;
+  color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+

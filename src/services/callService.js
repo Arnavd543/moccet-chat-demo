@@ -117,11 +117,19 @@ class CallService {
         updatedParticipants.push(userId);
       }
       
-      await updateDoc(callRef, {
+      // Update call to active state and set activeAt timestamp if this is the first joiner
+      const updateData = {
         participants: updatedParticipants,
         state: CALL_STATES.ACTIVE,
         updatedAt: serverTimestamp()
-      });
+      };
+      
+      // If call is transitioning from ringing to active, set activeAt
+      if (callData.state === CALL_STATES.RINGING) {
+        updateData.activeAt = serverTimestamp();
+      }
+      
+      await updateDoc(callRef, updateData);
       
       // Clear any timeout
       if (this.callTimer) {
@@ -155,9 +163,12 @@ class CallService {
     try {
       console.log('[CallService] Setting up local stream, video:', isVideo);
       
+      // Import media constraints from config
+      const { MEDIA_CONSTRAINTS } = await import('../config/webrtc');
+      
       const constraints = {
-        audio: true,
-        video: isVideo
+        audio: MEDIA_CONSTRAINTS.audio,
+        video: isVideo ? MEDIA_CONSTRAINTS.video : false
       };
       
       this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -182,7 +193,13 @@ class CallService {
   setupPeerConnectionHandlers(pc, callId, localId, remoteId) {
     // Handle remote stream
     pc.ontrack = (event) => {
-      console.log('[CallService] Received remote track:', event.track.kind);
+      console.log('[CallService] Received remote track:', {
+        kind: event.track.kind,
+        enabled: event.track.enabled,
+        readyState: event.track.readyState,
+        streams: event.streams.length,
+        remoteId: remoteId
+      });
       const [remoteStream] = event.streams;
       this.remoteStreams.set(remoteId, remoteStream);
       this.emit('remoteStream', { participantId: remoteId, stream: remoteStream });
@@ -244,9 +261,17 @@ class CallService {
     // Add local stream tracks
     if (this.localStream) {
       this.localStream.getTracks().forEach(track => {
-        console.log('[CallService] Adding local track:', track.kind);
+        console.log('[CallService] Adding local track:', {
+          kind: track.kind,
+          enabled: track.enabled,
+          readyState: track.readyState,
+          localId: localId,
+          remoteId: remoteId
+        });
         pc.addTrack(track, this.localStream);
       });
+    } else {
+      console.error('[CallService] No local stream available when creating peer connection');
     }
     
     // Set up data channel
@@ -340,8 +365,16 @@ class CallService {
           // Add local stream
           if (this.localStream) {
             this.localStream.getTracks().forEach(track => {
+              console.log('[CallService] Adding local track to answer PC:', {
+                kind: track.kind,
+                enabled: track.enabled,
+                localId: localId,
+                remoteId: remoteId
+              });
               pc.addTrack(track, this.localStream);
             });
+          } else {
+            console.error('[CallService] No local stream when responding to offer');
           }
           
           // Set up peer connection handlers
@@ -355,8 +388,8 @@ class CallService {
             // Process any pending candidates
             await this.processPendingCandidates(remoteId, pc);
             
-            // Listen for ICE candidates
-            this.listenForICECandidates(callId, localId, remoteId, pc, false);
+            // Listen for signaling (ICE candidates)
+            this.listenForSignaling(callId, localId, remoteId, pc, false);
           } catch (error) {
             console.error('[CallService] Error handling offer:', error);
           }
@@ -630,18 +663,50 @@ class CallService {
   }
 
   /**
-   * End the call
+   * Leave the call (remove current user from participants)
    */
   async endCall(reason = 'user') {
-    if (this.currentCall) {
+    if (this.currentCall && this.currentUserId) {
       try {
-        await updateDoc(doc(db, 'calls', this.currentCall.id), {
-          state: CALL_STATES.ENDED,
-          endedAt: serverTimestamp(),
-          endReason: reason
-        });
+        // Get the current call document
+        const callRef = doc(db, 'calls', this.currentCall.id);
+        const callDoc = await getDoc(callRef);
+        
+        if (callDoc.exists()) {
+          const callData = callDoc.data();
+          
+          // Remove current user from participants
+          const updatedParticipants = (callData.participants || []).filter(p => p !== this.currentUserId);
+          
+          // Check if this is the last participant
+          if (updatedParticipants.length === 0) {
+            // Last participant leaving - end the call
+            let duration = 0;
+            
+            // Calculate duration if call was active
+            if (callData.activeAt || callData.createdAt) {
+              const startTime = callData.activeAt || callData.createdAt;
+              const startTimestamp = startTime.toDate ? startTime.toDate() : new Date(startTime);
+              duration = Math.floor((Date.now() - startTimestamp.getTime()) / 1000);
+            }
+            
+            await updateDoc(callRef, {
+              state: CALL_STATES.ENDED,
+              participants: [],
+              endedAt: serverTimestamp(),
+              endReason: reason,
+              duration: duration // Save the duration in seconds
+            });
+          } else {
+            // Other participants still in call - just remove current user
+            await updateDoc(callRef, {
+              participants: updatedParticipants,
+              updatedAt: serverTimestamp()
+            });
+          }
+        }
       } catch (error) {
-        console.error('[CallService] Error ending call:', error);
+        console.error('[CallService] Error leaving call:', error);
       }
     }
     
@@ -651,8 +716,34 @@ class CallService {
   /**
    * Clean up a specific participant
    */
-  cleanupParticipant(participantId) {
+  async cleanupParticipant(participantId) {
     console.log('[CallService] Cleaning up participant:', participantId);
+    
+    // Clean up WebRTC documents if we're leaving the call
+    if (this.currentCall && this.currentUserId) {
+      try {
+        // Delete offers/answers/candidates related to this connection
+        const callId = this.currentCall.id;
+        
+        // Delete offers where we are sender or target
+        const offerRef1 = doc(db, `calls/${callId}/offers`, `${this.currentUserId}-${participantId}`);
+        const offerRef2 = doc(db, `calls/${callId}/offers`, `${participantId}-${this.currentUserId}`);
+        
+        // Delete answers where we are sender or target  
+        const answerRef1 = doc(db, `calls/${callId}/answers`, `${this.currentUserId}-${participantId}`);
+        const answerRef2 = doc(db, `calls/${callId}/answers`, `${participantId}-${this.currentUserId}`);
+        
+        // Delete in parallel, ignoring errors for non-existent docs
+        await Promise.all([
+          deleteDoc(offerRef1).catch(() => {}),
+          deleteDoc(offerRef2).catch(() => {}),
+          deleteDoc(answerRef1).catch(() => {}),
+          deleteDoc(answerRef2).catch(() => {})
+        ]);
+      } catch (error) {
+        console.error('[CallService] Error cleaning up WebRTC documents:', error);
+      }
+    }
     
     // Find and close peer connections with this participant
     const keysToDelete = [];
@@ -692,6 +783,43 @@ class CallService {
    */
   async cleanup() {
     console.log('[CallService] Cleaning up');
+    
+    // Clean up WebRTC documents before leaving
+    if (this.currentCall && this.currentUserId) {
+      try {
+        const callId = this.currentCall.id;
+        
+        // Get all participants to clean up connections with them
+        const participants = this.currentCall.participants || [];
+        const cleanupPromises = [];
+        
+        for (const participantId of participants) {
+          if (participantId !== this.currentUserId) {
+            // Delete offers/answers for each connection
+            cleanupPromises.push(
+              deleteDoc(doc(db, `calls/${callId}/offers`, `${this.currentUserId}-${participantId}`)).catch(() => {}),
+              deleteDoc(doc(db, `calls/${callId}/offers`, `${participantId}-${this.currentUserId}`)).catch(() => {}),
+              deleteDoc(doc(db, `calls/${callId}/answers`, `${this.currentUserId}-${participantId}`)).catch(() => {}),
+              deleteDoc(doc(db, `calls/${callId}/answers`, `${participantId}-${this.currentUserId}`)).catch(() => {})
+            );
+          }
+        }
+        
+        // Delete all candidates where we are sender
+        const candidatesQuery = query(
+          collection(db, `calls/${callId}/candidates`),
+          where('sender', '==', this.currentUserId)
+        );
+        const candidatesSnapshot = await getDocs(candidatesQuery);
+        candidatesSnapshot.forEach(doc => {
+          cleanupPromises.push(deleteDoc(doc.ref).catch(() => {}));
+        });
+        
+        await Promise.all(cleanupPromises);
+      } catch (error) {
+        console.error('[CallService] Error cleaning up WebRTC documents:', error);
+      }
+    }
     
     // Clear timer
     if (this.callTimer) {

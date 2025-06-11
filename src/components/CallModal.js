@@ -38,27 +38,59 @@ const CallModal = ({
       if (call.participants && call.participants.length > 0) {
         fetchParticipantInfo(call.participants);
       }
+    }
+  }, [isOpen, call]);
+
+  // Separate effect for timer to ensure it always starts
+  useEffect(() => {
+    if (isOpen && call) {
+      console.log('[CallModal] Setting up timer for call:', {
+        callId: call.id,
+        initiatorId: call.initiatorId,
+        currentUserId: currentUser.uid,
+        isInitiator: call.initiatorId === currentUser.uid,
+        activeAt: call.activeAt,
+        createdAt: call.createdAt
+      });
       
-      // Start duration timer using call creation time
-      const callCreatedAt = call.createdAt?.toDate?.() || new Date(call.createdAt) || new Date();
-      callStartTime.current = callCreatedAt.getTime();
+      // Use the call's start time (activeAt or createdAt) to maintain consistent timing
+      let startTime;
+      if (call.activeAt) {
+        startTime = call.activeAt.toDate ? call.activeAt.toDate() : new Date(call.activeAt);
+      } else if (call.createdAt) {
+        startTime = call.createdAt.toDate ? call.createdAt.toDate() : new Date(call.createdAt);
+      } else {
+        // Fallback to current time if no timestamps available
+        startTime = new Date();
+      }
       
-      // Update timer immediately and then every second
-      const updateDuration = () => {
-        const duration = Math.floor((Date.now() - callStartTime.current) / 1000);
-        setCallDuration(duration);
-      };
+      callStartTime.current = startTime.getTime();
       
-      updateDuration(); // Initial update
-      durationInterval.current = setInterval(updateDuration, 1000);
+      // Clear any existing timer
+      if (durationInterval.current) {
+        clearInterval(durationInterval.current);
+      }
+      
+      // Calculate initial duration
+      const initialDuration = Math.floor((Date.now() - callStartTime.current) / 1000);
+      setCallDuration(initialDuration);
+      
+      // Update timer every second
+      durationInterval.current = setInterval(() => {
+        if (callStartTime.current) {
+          const duration = Math.floor((Date.now() - callStartTime.current) / 1000);
+          setCallDuration(duration);
+        }
+      }, 1000);
     }
 
     return () => {
       if (durationInterval.current) {
         clearInterval(durationInterval.current);
+        durationInterval.current = null;
       }
     };
-  }, [isOpen, call]);
+  }, [isOpen, call?.activeAt, call?.createdAt]); // Update when timestamps change
 
   // Function to fetch participant info
   const fetchParticipantInfo = async (participantIds) => {
@@ -156,6 +188,14 @@ const CallModal = ({
       // Remove from remote participants
       setRemoteParticipants(prev => prev.filter(p => p.id !== participantId));
     };
+    
+    const handleCallStateChanged = (state) => {
+      console.log('[CallModal] Call state changed:', state);
+      if (state === 'ended') {
+        // Call has ended, close the modal
+        onClose();
+      }
+    };
 
     webRTCService.on('remoteStream', handleRemoteStream);
     webRTCService.on('connectionState', handleConnectionState);
@@ -166,6 +206,7 @@ const CallModal = ({
     webRTCService.on('participantsUpdated', handleParticipantsUpdate);
     webRTCService.on('localStreamUpdated', handleLocalStreamUpdate);
     webRTCService.on('participantLeft', handleParticipantLeft);
+    webRTCService.on('callStateChanged', handleCallStateChanged);
 
     return () => {
       webRTCService.off('remoteStream', handleRemoteStream);
@@ -177,6 +218,7 @@ const CallModal = ({
       webRTCService.off('participantsUpdated', handleParticipantsUpdate);
       webRTCService.off('localStreamUpdated', handleLocalStreamUpdate);
       webRTCService.off('participantLeft', handleParticipantLeft);
+      webRTCService.off('callStateChanged', handleCallStateChanged);
     };
   }, [currentUser, participants]);
 
@@ -264,6 +306,9 @@ const CallModal = ({
   };
 
   const formatDuration = (seconds) => {
+    if (isNaN(seconds) || seconds === null || seconds === undefined) {
+      return '0:00';
+    }
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;

@@ -42,6 +42,8 @@ const MoccetChat = () => {
   const [showCreateChannel, setShowCreateChannel] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
   const [showAIAnalytics, setShowAIAnalytics] = useState(false);
+  const [showMembersList, setShowMembersList] = useState(false);
+  const [channelMembers, setChannelMembers] = useState([]);
   
   // ============ Data State Management ============
   const [inputValue, setInputValue] = useState('');
@@ -398,8 +400,7 @@ const MoccetChat = () => {
         const callsRef = collection(db, 'calls');
         const q = query(
           callsRef,
-          where('channelId', '==', activeChannelId),
-          where('state', 'in', ['initiating', 'ringing', 'active', 'ended'])
+          where('channelId', '==', activeChannelId)
         );
         
         const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -430,8 +431,25 @@ const MoccetChat = () => {
             }
           });
           
+          // Clean up very old ended calls (older than 24 hours) to prevent memory issues
+          const now = Date.now();
+          for (const [callId, callData] of updatedCalls.entries()) {
+            if (callData.state === 'ended' && callData.endedAt) {
+              const endedTimestamp = callData.endedAt.toDate ? callData.endedAt.toDate().getTime() : new Date(callData.endedAt).getTime();
+              if (now - endedTimestamp > 24 * 60 * 60 * 1000) { // 24 hours
+                updatedCalls.delete(callId);
+              }
+            }
+          }
+          
           // Update active calls map
           setActiveCallsInChannel(updatedCalls);
+          
+          // Update activeCall if it exists in the updated calls
+          if (activeCall && updatedCalls.has(activeCall.id)) {
+            const updatedCallData = updatedCalls.get(activeCall.id);
+            setActiveCall(prevCall => ({ ...prevCall, ...updatedCallData }));
+          }
           
           // Clear incoming call if it's no longer active, if user joined, or if call ended
           if (incomingCall && (!updatedCalls.has(incomingCall.id) || 
@@ -448,7 +466,7 @@ const MoccetChat = () => {
     };
 
     checkForCalls();
-  }, [activeChannelId, currentUser, isInCall, activeCall]);
+  }, [activeChannelId, currentUser, isInCall]); // Removed activeCall to prevent infinite loop
 
   // Listen for participant updates from WebRTC service
   useEffect(() => {
@@ -465,6 +483,16 @@ const MoccetChat = () => {
       webRTCService.off('participantsUpdated', handleParticipantsUpdate);
     };
   }, [isInCall, activeCall]);
+
+  // Fetch channel members when modal opens
+  useEffect(() => {
+    if (showMembersList && activeChannelId) {
+      const activeChannel = channels.find(c => c.id === activeChannelId);
+      if (activeChannel?.members) {
+        fetchParticipantInfo(activeChannel.members).then(setChannelMembers);
+      }
+    }
+  }, [showMembersList, activeChannelId, channels]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -1316,6 +1344,18 @@ const MoccetChat = () => {
         {/* Chat Header */}
         <div className="moccet-chat-header">
           <div className="moccet-header-title">
+            {/* Members button */}
+            <button 
+              className="moccet-members-button"
+              onClick={() => setShowMembersList(!showMembersList)}
+              title="View channel members"
+            >
+              <i className="fa-solid fa-users"></i>
+              <span className="moccet-members-count">
+                {channels.find(c => c.id === activeChannelId)?.members?.length || 0}
+              </span>
+            </button>
+            
             <div className="moccet-project-icon">
               <i className={`fa-solid ${channels.find(c => c.id === activeChannelId)?.type === 'private' ? 'fa-lock' : 'fa-hashtag'}`}></i>
             </div>
@@ -1326,24 +1366,6 @@ const MoccetChat = () => {
                   const channelName = activeChannel?.name || (activeChannelId ? `Channel ${activeChannelId.substring(0, 8)}` : 'Select a channel');
                   return channelName;
                 })()}
-              </div>
-              <div className="moccet-project-members">
-                <div className="moccet-project-members-avatars">
-                  {channels.find(c => c.id === activeChannelId)?.members?.slice(0, 3).map((member, idx) => (
-                    <div key={idx} className="moccet-member-avatar">
-                      {member.photoURL ? (
-                        <img src={member.photoURL} alt="Member" />
-                      ) : (
-                        <div className="moccet-member-default-avatar">
-                          <i className="fa-solid fa-user"></i>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                {channels.find(c => c.id === activeChannelId)?.members?.length > 3 && (
-                  <div className="moccet-member-count">+{channels.find(c => c.id === activeChannelId)?.members?.length - 3} more</div>
-                )}
               </div>
             </div>
           </div>
@@ -1550,7 +1572,11 @@ const MoccetChat = () => {
                           {/* Call info for system messages */}
                           {message.isSystemMessage && message.callId && (
                             <div style={{ marginTop: '12px' }}>
-                              {!isInCall && activeCallsInChannel.has(message.callId) ? (
+                              {(() => {
+                                const callData = activeCallsInChannel.get(message.callId);
+                                const callIsActive = callData && callData.state !== 'ended' && callData.participants && callData.participants.length > 0;
+                                return !isInCall && callIsActive;
+                              })() ? (
                                 <button
                                   onClick={async () => {
                                     try {
@@ -2250,6 +2276,44 @@ const MoccetChat = () => {
         isOpen={showAIAnalytics}
         onClose={() => setShowAIAnalytics(false)}
       />
+      
+      {/* Members List Modal */}
+      {showMembersList && (
+        <div className="moccet-modal" onClick={() => setShowMembersList(false)}>
+          <div className="moccet-modal-content" style={{ maxWidth: '400px' }} onClick={e => e.stopPropagation()}>
+            <div className="moccet-modal-header">
+              <h2>Channel Members</h2>
+              <button className="moccet-modal-close" onClick={() => setShowMembersList(false)}>
+                <i className="fa-solid fa-times"></i>
+              </button>
+            </div>
+            <div className="moccet-modal-body">
+              <div className="moccet-members-list">
+                {channelMembers.map(member => (
+                  <div key={member.id} className="moccet-member-item">
+                    <div className="moccet-member-avatar">
+                      {member.photoURL ? (
+                        <img src={member.photoURL} alt={member.name} />
+                      ) : (
+                        <div className="moccet-member-default-avatar">
+                          <i className="fa-solid fa-user"></i>
+                        </div>
+                      )}
+                    </div>
+                    <div className="moccet-member-info">
+                      <div className="moccet-member-name">{member.name}</div>
+                      <div className="moccet-member-email">{member.email}</div>
+                    </div>
+                    {member.id === currentUser?.uid && (
+                      <span className="moccet-member-badge">You</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* AI Context Menu */}
       <AIContextMenu
